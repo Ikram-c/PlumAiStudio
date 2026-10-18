@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 128 },
+        "photoURL": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "createdAt", "updatedAt"]
+    },
+    "SavedDataset": {
+      "title": "SavedDataset",
+      "description": "User saved COCO dataset",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 128 },
+        "description": { "type": "string", "maxLength": 512 },
+        "annotationCount": { "type": "integer" },
+        "imageCount": { "type": "integer" },
+        "datasetJson": { "type": "string", "maxLength": 1000000 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "name", "createdAt", "updatedAt"]
+    },
+    "AnalysisRecord": {
+      "title": "AnalysisRecord",
+      "description": "Persisted analysis history",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "enum": ["exposure", "frequency", "gjk", "overlap"] },
+        "title": { "type": "string", "maxLength": 128 },
+        "summary": { "type": "string", "maxLength": 512 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "type", "title", "createdAt"]
+    },
+    "GeneratedImageRecord": {
+      "title": "GeneratedImageRecord",
+      "description": "AI created or edited image record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "prompt": { "type": "string", "maxLength": 1024 },
+        "imageUrl": { "type": "string", "maxLength": 1000000 },
+        "modelUsed": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "prompt", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Private user profiles"
+    },
+    "/users/{userId}/savedDatasets/{datasetId}": {
+      "schema": "SavedDataset",
+      "description": "User saved COCO datasets"
+    },
+    "/users/{userId}/analysisRecords/{recordId}": {
+      "schema": "AnalysisRecord",
+      "description": "User saved diagnostics"
+    },
+    "/users/{userId}/generatedImages/{imageId}": {
+      "schema": "GeneratedImageRecord",
+      "description": "User created and edited synthetic survey images"
+    }
+  }
+}

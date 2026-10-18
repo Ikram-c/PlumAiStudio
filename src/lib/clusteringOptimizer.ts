@@ -1,8 +1,19 @@
 import { COCODataset, AnchorBoxRec, DetectionOptimizerOutput } from '../types';
 
 /**
- * Geometric clustering and detection optimizer.
- * Ported from vision_toolkit.clustering.detection_optimizer.py and analyzer.py.
+ * Calculates Intersection over Union between two box sizes centered at (0, 0).
+ */
+function boxIoU(w1: number, h1: number, w2: number, h2: number): number {
+  const minW = Math.min(w1, w2);
+  const minH = Math.min(h1, h2);
+  const inter = minW * minH;
+  const union = w1 * h1 + w2 * h2 - inter;
+  return union > 0 ? inter / union : 0;
+}
+
+/**
+ * Geometric clustering and detection optimizer with K-Means++ initialization.
+ * Ported and optimized from vision_toolkit.clustering.detection_optimizer.py.
  */
 export function runDetectionOptimizer(
   dataset: COCODataset,
@@ -22,8 +33,8 @@ export function runDetectionOptimizer(
   const boxes = annotations.map((a) => {
     const [x, y, w, h] = a.bbox;
     return {
-      w: Math.max(1, w),
-      h: Math.max(1, h),
+      w: Math.max(2, w),
+      h: Math.max(2, h),
       area: a.area || w * h,
       aspectRatio: h > 0 ? w / h : 1,
       catId: a.category_id,
@@ -31,35 +42,70 @@ export function runDetectionOptimizer(
     };
   });
 
-  // Simple k-means on width & height
   const k = Math.min(numAnchors, boxes.length);
-  // Initialize centroids
+
+  // K-Means++ Initialization
   const centroids: { w: number; h: number }[] = [];
-  const step = Math.floor(boxes.length / k);
-  for (let i = 0; i < k; i++) {
-    centroids.push({ w: boxes[i * step].w, h: boxes[i * step].h });
+  // 1. Pick first center uniformly at random or median
+  const firstIdx = Math.floor(boxes.length / 2);
+  centroids.push({ w: boxes[firstIdx].w, h: boxes[firstIdx].h });
+
+  // 2. Pick remaining k-1 centers with probability proportional to D(x)^2
+  while (centroids.length < k) {
+    const distSq = new Float64Array(boxes.length);
+    let sumDistSq = 0;
+
+    for (let i = 0; i < boxes.length; i++) {
+      let minDistSq = Infinity;
+      for (const c of centroids) {
+        const dw = boxes[i].w - c.w;
+        const dh = boxes[i].h - c.h;
+        const d2 = dw * dw + dh * dh;
+        if (d2 < minDistSq) minDistSq = d2;
+      }
+      distSq[i] = minDistSq;
+      sumDistSq += minDistSq;
+    }
+
+    // Cumulative probabilistic sampling
+    let r = Math.random() * sumDistSq;
+    let chosenIdx = 0;
+    for (let i = 0; i < boxes.length; i++) {
+      r -= distSq[i];
+      if (r <= 0) {
+        chosenIdx = i;
+        break;
+      }
+    }
+    centroids.push({ w: boxes[chosenIdx].w, h: boxes[chosenIdx].h });
   }
 
+  // K-Means Convergence Loop
   const clusterAssignments = new Int32Array(boxes.length);
 
-  for (let iter = 0; iter < 10; iter++) {
-    // Assign
+  for (let iter = 0; iter < 15; iter++) {
+    let changed = false;
+
+    // Assignment step (minimize 1 - IoU distance)
     for (let i = 0; i < boxes.length; i++) {
-      let minDist = Infinity;
+      let maxIoU = -1;
       let bestC = 0;
       for (let c = 0; c < k; c++) {
-        const dw = boxes[i].w - centroids[c].w;
-        const dh = boxes[i].h - centroids[c].h;
-        const d = dw * dw + dh * dh;
-        if (d < minDist) {
-          minDist = d;
+        const iou = boxIoU(boxes[i].w, boxes[i].h, centroids[c].w, centroids[c].h);
+        if (iou > maxIoU) {
+          maxIoU = iou;
           bestC = c;
         }
       }
-      clusterAssignments[i] = bestC;
+      if (clusterAssignments[i] !== bestC) {
+        clusterAssignments[i] = bestC;
+        changed = true;
+      }
     }
 
-    // Update
+    if (!changed && iter > 2) break;
+
+    // Update step: median/mean of cluster members
     const counts = new Uint32Array(k);
     const sumW = new Float64Array(k);
     const sumH = new Float64Array(k);
@@ -112,16 +158,29 @@ export function runDetectionOptimizer(
     };
   });
 
+  // Calculate Mean Best Overlap (IoU) of anchors across the dataset
+  let totalBestIoU = 0;
+  for (const b of boxes) {
+    let best = 0;
+    for (const a of anchorBoxes) {
+      const iou = boxIoU(b.w, b.h, a.width, a.height);
+      if (iou > best) best = iou;
+    }
+    totalBestIoU += best;
+  }
+  const meanBestIoU = (totalBestIoU / boxes.length) * 100;
+
   // Augmentation advice
   const aspectRatios = boxes.map((b) => b.aspectRatio);
   const minAr = Math.min(...aspectRatios);
   const maxAr = Math.max(...aspectRatios);
   const augmentations: string[] = [];
 
+  augmentations.push(`Anchor IoU Coverage: ${meanBestIoU.toFixed(1)}% Mean Best Overlap achieved.`);
   if (maxAr / Math.max(0.01, minAr) > 4.0) {
-    augmentations.push('High aspect-ratio variance detected: apply random scaling and aspect-ratio jitter.');
+    augmentations.push('High aspect-ratio variance detected: apply random scaling and aspect-ratio jitter (0.8x to 1.33x).');
   }
-  augmentations.push('Apply random horizontal and vertical spatial flips with p=0.5 (suitable for quadrat/nadir imagery).');
+  augmentations.push('Apply random horizontal and vertical spatial flips with p=0.5 (ideal for nadir & quadrat surveys).');
   augmentations.push('Apply multi-scale mosaic training (320px to 896px) to maintain detection performance across both macro and micro objects.');
   augmentations.push('Recommend random brightness & contrast jitter (±15%) for underwater light falloff resilience.');
 

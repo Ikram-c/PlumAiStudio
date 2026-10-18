@@ -1,16 +1,17 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { analyzeImageExposure, analyzeSpatialFrequency } from '../lib/quality';
 import { ExposureAnalysis, SpatialFrequencyAnalysis } from '../types';
-import { Sparkles, Upload, Activity, Compass, AlertCircle, CheckCircle, Sliders } from 'lucide-react';
+import { Sparkles, Upload, Activity, Sliders, CheckCircle2 } from 'lucide-react';
 
 export const QualityProfiler: React.FC = () => {
   const [selectedSample, setSelectedSample] = useState<'benthic' | 'overexposed' | 'underexposed' | 'texture'>('benthic');
   const [exposureData, setExposureData] = useState<ExposureAnalysis | null>(null);
   const [frequencyData, setFrequencyData] = useState<SpatialFrequencyAnalysis | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Generate synthetic test images corresponding to marine image pipelines
+  // Generate synthetic test frames
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -36,7 +37,6 @@ export const QualityProfiler: React.FC = () => {
           data[idx + 2] = Math.min(255, Math.max(0, 140 + noise + y * 0.2)); // Blue
           data[idx + 3] = 255;
         } else if (selectedSample === 'overexposed') {
-          // High sun glare / overexposed dropcam flash
           const dist = Math.hypot(x - canvas.width / 2, y - canvas.height / 2);
           const flash = Math.max(0, 255 - dist * 1.2);
           data[idx] = Math.min(255, 210 + flash);
@@ -44,7 +44,6 @@ export const QualityProfiler: React.FC = () => {
           data[idx + 2] = Math.min(255, 220 + flash);
           data[idx + 3] = 255;
         } else if (selectedSample === 'underexposed') {
-          // Deep abyss camera with poor illumination
           const r = 15 + Math.random() * 12;
           const g = 25 + Math.random() * 15;
           const b = 35 + Math.random() * 20;
@@ -72,9 +71,7 @@ export const QualityProfiler: React.FC = () => {
     setFrequencyData(freq);
   }, [selectedSample]);
 
-  const handleCustomImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processImageFile = (file: File) => {
     const img = new Image();
     img.onload = () => {
       const canvas = canvasRef.current;
@@ -91,6 +88,20 @@ export const QualityProfiler: React.FC = () => {
     img.src = URL.createObjectURL(file);
   };
 
+  const handleCustomImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processImageFile(file);
+  };
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDraggingOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      processImageFile(file);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -100,6 +111,9 @@ export const QualityProfiler: React.FC = () => {
             <div className="flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-teal-400" />
               <h1 className="text-xl font-bold text-white tracking-tight">Image Quality & Frequency Profiler</h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-teal-950 text-teal-300 border border-teal-800/60">
+                Drag & Drop Ready
+              </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
               Exposure analyzer (ISO/dynamic range/clipping) and 2D spatial frequency energy distribution.
@@ -110,39 +124,39 @@ export const QualityProfiler: React.FC = () => {
             <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
               <button
                 onClick={() => setSelectedSample('benthic')}
-                className={`px-3 py-1 rounded-lg ${
-                  selectedSample === 'benthic' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400'
+                className={`px-3 py-1 rounded-lg transition-colors ${
+                  selectedSample === 'benthic' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Benthic Coral
               </button>
               <button
                 onClick={() => setSelectedSample('overexposed')}
-                className={`px-3 py-1 rounded-lg ${
-                  selectedSample === 'overexposed' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400'
+                className={`px-3 py-1 rounded-lg transition-colors ${
+                  selectedSample === 'overexposed' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Overexposed
               </button>
               <button
                 onClick={() => setSelectedSample('underexposed')}
-                className={`px-3 py-1 rounded-lg ${
-                  selectedSample === 'underexposed' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400'
+                className={`px-3 py-1 rounded-lg transition-colors ${
+                  selectedSample === 'underexposed' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 Deep Abyss
               </button>
               <button
                 onClick={() => setSelectedSample('texture')}
-                className={`px-3 py-1 rounded-lg ${
-                  selectedSample === 'texture' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400'
+                className={`px-3 py-1 rounded-lg transition-colors ${
+                  selectedSample === 'texture' ? 'bg-teal-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
                 High Texture
               </button>
             </div>
 
-            <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 inline-flex items-center gap-1.5">
+            <label className="cursor-pointer px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 inline-flex items-center gap-1.5 transition-colors">
               <Upload className="w-3.5 h-3.5" />
               <span>Upload Image</span>
               <input type="file" accept="image/*" onChange={handleCustomImage} className="hidden" />
@@ -157,7 +171,7 @@ export const QualityProfiler: React.FC = () => {
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Sample Frame Buffer
+              Frame Buffer (Drag & Drop Any Image)
             </span>
             {exposureData && (
               <span
@@ -174,8 +188,23 @@ export const QualityProfiler: React.FC = () => {
             )}
           </div>
 
-          <div className="aspect-[4/3] w-full rounded-xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingOver(true);
+            }}
+            onDragLeave={() => setIsDraggingOver(false)}
+            onDrop={handleDrop}
+            className={`aspect-[4/3] w-full rounded-xl overflow-hidden border transition-all bg-slate-950 flex items-center justify-center relative ${
+              isDraggingOver ? 'border-teal-400 ring-2 ring-teal-500/30' : 'border-slate-800'
+            }`}
+          >
             <canvas ref={canvasRef} className="w-full h-full object-cover block" />
+            {isDraggingOver && (
+              <div className="absolute inset-0 bg-teal-950/80 backdrop-blur-sm flex items-center justify-center text-teal-200 text-xs font-medium">
+                Drop image here to analyze
+              </div>
+            )}
           </div>
 
           {/* Luminance Histogram */}

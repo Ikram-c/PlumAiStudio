@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidUserProfile(data) {
+      return data.keys().hasAll(['id', 'email', 'createdAt', 'updatedAt']) &&
+             data.id is string && data.id == request.auth.uid &&
+             data.email is string && data.email.size() <= 256 &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidSavedDataset(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'name', 'createdAt', 'updatedAt']) &&
+             data.userId == userId &&
+             data.id is string && data.id.size() <= 128 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 128 &&
+             data.createdAt is string &&
+             data.updatedAt is string;
+    }
+
+    function isValidAnalysisRecord(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'type', 'title', 'createdAt']) &&
+             data.userId == userId &&
+             data.id is string && data.id.size() <= 128 &&
+             data.title is string && data.title.size() <= 128 &&
+             data.type is string &&
+             data.createdAt is string;
+    }
+
+    function isValidGeneratedImageRecord(data, userId) {
+      return data.keys().hasAll(['id', 'userId', 'prompt', 'createdAt']) &&
+             data.userId == userId &&
+             data.id is string && data.id.size() <= 128 &&
+             data.prompt is string && data.prompt.size() <= 1024 &&
+             data.createdAt is string;
+    }
+
+    // User Profile
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isValidId(userId) && isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow update: if isValidId(userId) && isOwner(userId) && isValidUserProfile(request.resource.data);
+      allow delete: if isValidId(userId) && isOwner(userId);
+
+      // User's Saved Datasets
+      match /savedDatasets/{datasetId} {
+        allow get, list: if isValidId(userId) && isOwner(userId);
+        allow create: if isValidId(userId) && isOwner(userId) && isValidId(datasetId) && isValidSavedDataset(request.resource.data, userId);
+        allow update: if isValidId(userId) && isOwner(userId) && isValidId(datasetId) && isValidSavedDataset(request.resource.data, userId);
+        allow delete: if isValidId(userId) && isOwner(userId) && isValidId(datasetId);
+      }
+
+      // User's Analysis History
+      match /analysisRecords/{recordId} {
+        allow get, list: if isValidId(userId) && isOwner(userId);
+        allow create: if isValidId(userId) && isOwner(userId) && isValidId(recordId) && isValidAnalysisRecord(request.resource.data, userId);
+        allow update: if isValidId(userId) && isOwner(userId) && isValidId(recordId) && isValidAnalysisRecord(request.resource.data, userId);
+        allow delete: if isValidId(userId) && isOwner(userId) && isValidId(recordId);
+      }
+
+      // User's Generated / Edited Images
+      match /generatedImages/{imageId} {
+        allow get, list: if isValidId(userId) && isOwner(userId);
+        allow create: if isValidId(userId) && isOwner(userId) && isValidId(imageId) && isValidGeneratedImageRecord(request.resource.data, userId);
+        allow update: if isValidId(userId) && isOwner(userId) && isValidId(imageId) && isValidGeneratedImageRecord(request.resource.data, userId);
+        allow delete: if isValidId(userId) && isOwner(userId) && isValidId(imageId);
+      }
+    }
+  }
+}

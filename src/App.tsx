@@ -8,9 +8,10 @@ import { QualityProfiler } from './components/QualityProfiler';
 import { CACorrector } from './components/CACorrector';
 import { DetectionOptimizer } from './components/DetectionOptimizer';
 import { VideoZarrConfigurator } from './components/VideoZarrConfigurator';
+import { AIImageStudio } from './components/AIImageStudio';
+import { ResearchHub } from './components/ResearchHub';
 import { createMarineSurveyDataset, createDroneSurveyDataset } from './lib/cocoTools';
 import { COCODataset } from './types';
-import { Terminal, BookOpen, Layers } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
@@ -51,8 +52,16 @@ export const App: React.FC = () => {
       {/* Main Tab Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === 'dashboard' && (
-          <COCODashboard dataset={dataset} onUploadDataset={handleUploadDataset} />
+          <COCODashboard
+            dataset={dataset}
+            onUploadDataset={handleUploadDataset}
+            onNavigateToResearch={() => setActiveTab('research')}
+          />
         )}
+
+        {activeTab === 'research' && <ResearchHub />}
+
+        {activeTab === 'ai-studio' && <AIImageStudio />}
 
         {activeTab === 'heatmap' && <HeatmapViewer dataset={dataset} />}
 
@@ -81,9 +90,9 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 font-mono text-[11px]">
-            <span className="text-slate-400">Ported from Ikram-c/PlumImageTools</span>
+            <span className="text-slate-400">Firebase Auth & Firestore Connected</span>
             <span>•</span>
-            <span className="text-emerald-400">React 19 / Vite / Tailwind</span>
+            <span className="text-emerald-400">Full-Stack Express + Vite</span>
           </div>
         </div>
       </footer>

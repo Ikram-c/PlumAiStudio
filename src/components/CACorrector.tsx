@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { correctChromaticAberration, CACorrectionParams } from '../lib/chromaticAberration';
-import { SlidersHorizontal, RefreshCw, Layers, CheckCircle2, SplitSquareVertical } from 'lucide-react';
+import { SlidersHorizontal, Layers, SplitSquareVertical, Sparkles, Download } from 'lucide-react';
 
 export const CACorrector: React.FC = () => {
   const [radius, setRadius] = useState<number>(8);
@@ -9,32 +9,88 @@ export const CACorrector: React.FC = () => {
   const [safety, setSafety] = useState<number>(0.1);
   const [splitPos, setSplitPos] = useState<number>(50); // percentage slider
 
-  const origCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const correctedCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Canvas references
   const compositeCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isDraggingSplitRef = useRef<boolean>(false);
 
-  // Generate synthetic test frame with high-contrast edges and lateral color fringing
+  // Cached offscreen buffers so dragging split slider is instant (60fps)
+  const cachedOrigCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const cachedCorrCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Initialize cached offscreen canvases once
   useEffect(() => {
-    const origCanvas = origCanvasRef.current;
-    const correctedCanvas = correctedCanvasRef.current;
-    const compositeCanvas = compositeCanvasRef.current;
-    if (!origCanvas || !correctedCanvas || !compositeCanvas) return;
+    if (!cachedOrigCanvasRef.current) {
+      cachedOrigCanvasRef.current = document.createElement('canvas');
+      cachedOrigCanvasRef.current.width = 480;
+      cachedOrigCanvasRef.current.height = 320;
+    }
+    if (!cachedCorrCanvasRef.current) {
+      cachedCorrCanvasRef.current = document.createElement('canvas');
+      cachedCorrCanvasRef.current.width = 480;
+      cachedCorrCanvasRef.current.height = 320;
+    }
+  }, []);
+
+  // Fast compositing pass (runs instantly on split slider drag)
+  const renderComposite = useCallback((splitPercentage: number) => {
+    const compCanvas = compositeCanvasRef.current;
+    const origCanvas = cachedOrigCanvasRef.current;
+    const corrCanvas = cachedCorrCanvasRef.current;
+    if (!compCanvas || !origCanvas || !corrCanvas) return;
+
+    const ctx = compCanvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = compCanvas.width;
+    const height = compCanvas.height;
+
+    // Draw full original
+    ctx.drawImage(origCanvas, 0, 0);
+
+    // Clip and draw right half from corrected
+    const splitX = (width * splitPercentage) / 100;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(splitX, 0, width - splitX, height);
+    ctx.clip();
+    ctx.drawImage(corrCanvas, 0, 0);
+    ctx.restore();
+
+    // Divider line & handle
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(splitX, 0);
+    ctx.lineTo(splitX, height);
+    ctx.stroke();
+
+    // Small split handle circle in middle
+    ctx.fillStyle = '#6366f1';
+    ctx.beginPath();
+    ctx.arc(splitX, height / 2, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }, []);
+
+  // Heavy filter computation: ONLY re-runs when filter params change, NOT when splitPos changes!
+  useEffect(() => {
+    const origCanvas = cachedOrigCanvasRef.current;
+    const corrCanvas = cachedCorrCanvasRef.current;
+    const compCanvas = compositeCanvasRef.current;
+    if (!origCanvas || !corrCanvas || !compCanvas) return;
 
     const width = 480;
     const height = 320;
-    origCanvas.width = width;
-    origCanvas.height = height;
-    correctedCanvas.width = width;
-    correctedCanvas.height = height;
-    compositeCanvas.width = width;
-    compositeCanvas.height = height;
+    compCanvas.width = width;
+    compCanvas.height = height;
 
     const ctxOrig = origCanvas.getContext('2d');
-    const ctxCorr = correctedCanvas.getContext('2d');
-    const ctxComp = compositeCanvas.getContext('2d');
-    if (!ctxOrig || !ctxCorr || !ctxComp) return;
+    const ctxCorr = corrCanvas.getContext('2d');
+    if (!ctxOrig || !ctxCorr) return;
 
-    // Draw background scene with sharp high-contrast geometry & artificial chromatic fringing
+    // Generate high-contrast test pattern with intentional lateral chromatic aberration
     const imgData = ctxOrig.createImageData(width, height);
     const data = imgData.data;
 
@@ -49,13 +105,13 @@ export const CACorrector: React.FC = () => {
         const dy = y - cy;
         const rDist = Math.hypot(dx, dy);
 
-        // Radial test pattern (starburst / spoke resolution chart)
+        // Radial test pattern (starburst spoke resolution chart)
         const angle = Math.atan2(dy, dx);
         const spoke = Math.sin(angle * 12) > 0 ? 220 : 35;
         const ring = Math.sin(rDist * 0.15) > 0 ? 220 : 35;
         const baseIntensity = (spoke + ring) / 2;
 
-        // Artificial lateral chromatic aberration: red shifted outward, blue shifted inward
+        // Artificial lateral chromatic aberration
         const aberrationScale = (rDist / maxR) * 6.0;
         const redIntensity = Math.min(
           255,
@@ -76,7 +132,7 @@ export const CACorrector: React.FC = () => {
 
     ctxOrig.putImageData(imgData, 0, 0);
 
-    // Run guided-filter CA correction
+    // Compute guided-filter CA correction
     const correctedImgData = correctChromaticAberration(imgData, {
       radius,
       strength,
@@ -85,26 +141,24 @@ export const CACorrector: React.FC = () => {
     });
     ctxCorr.putImageData(correctedImgData, 0, 0);
 
-    // Draw split view to composite canvas
-    ctxComp.drawImage(origCanvas, 0, 0);
-    const splitX = (width * splitPos) / 100;
+    // Fast render
+    renderComposite(splitPos);
+  }, [radius, strength, guideChannel, safety, renderComposite]);
 
-    // Draw right half from corrected
-    ctxComp.save();
-    ctxComp.beginPath();
-    ctxComp.rect(splitX, 0, width - splitX, height);
-    ctxComp.clip();
-    ctxComp.drawImage(correctedCanvas, 0, 0);
-    ctxComp.restore();
+  // Handle splitPos change without recomputing filter
+  useEffect(() => {
+    renderComposite(splitPos);
+  }, [splitPos, renderComposite]);
 
-    // Divider line
-    ctxComp.strokeStyle = '#ffffff';
-    ctxComp.lineWidth = 2;
-    ctxComp.beginPath();
-    ctxComp.moveTo(splitX, 0);
-    ctxComp.lineTo(splitX, height);
-    ctxComp.stroke();
-  }, [radius, strength, guideChannel, safety, splitPos]);
+  // Pointer drag on canvas directly
+  const handleCanvasPointer = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = compositeCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const pct = Math.min(98, Math.max(2, Math.round((x / rect.width) * 100)));
+    setSplitPos(pct);
+  };
 
   return (
     <div className="space-y-6">
@@ -115,6 +169,9 @@ export const CACorrector: React.FC = () => {
             <div className="flex items-center gap-2">
               <SlidersHorizontal className="w-5 h-5 text-indigo-400" />
               <h1 className="text-xl font-bold text-white tracking-tight">Chromatic Aberration Correction</h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-800/60">
+                Optimized 60 FPS
+              </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
               Guided-filter manifold alignment for lateral color fringing suppression on wide-angle & drone lenses.
@@ -126,7 +183,7 @@ export const CACorrector: React.FC = () => {
             <select
               value={guideChannel}
               onChange={(e) => setGuideChannel(e.target.value as any)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-indigo-500"
             >
               <option value="green">Green (Default)</option>
               <option value="luminance">Luminance (Rec.709)</option>
@@ -142,7 +199,7 @@ export const CACorrector: React.FC = () => {
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Before / After Guided-Filter Split View
+              Before / After Guided-Filter Split View (Click / Drag on canvas)
             </span>
             <div className="flex items-center gap-3 text-xs font-mono">
               <span className="text-rose-400">← Raw Fringing</span>
@@ -150,15 +207,26 @@ export const CACorrector: React.FC = () => {
             </div>
           </div>
 
-          <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner">
-            <canvas ref={compositeCanvasRef} className="w-full h-full object-cover block" />
-            <canvas ref={origCanvasRef} className="hidden" />
-            <canvas ref={correctedCanvasRef} className="hidden" />
+          <div className="relative w-full aspect-[3/2] rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner group">
+            <canvas
+              ref={compositeCanvasRef}
+              onPointerDown={(e) => {
+                isDraggingSplitRef.current = true;
+                handleCanvasPointer(e);
+              }}
+              onPointerMove={(e) => {
+                if (isDraggingSplitRef.current) handleCanvasPointer(e);
+              }}
+              onPointerUp={() => {
+                isDraggingSplitRef.current = false;
+              }}
+              className="w-full h-full object-cover block cursor-ew-resize"
+            />
 
-            <div className="absolute bottom-3 left-3 bg-slate-950/80 px-2 py-1 rounded text-[11px] font-mono text-rose-300 border border-rose-900/60">
+            <div className="absolute bottom-3 left-3 bg-slate-950/80 px-2 py-1 rounded text-[11px] font-mono text-rose-300 border border-rose-900/60 pointer-events-none">
               Lateral Dispersion
             </div>
-            <div className="absolute bottom-3 right-3 bg-slate-950/80 px-2 py-1 rounded text-[11px] font-mono text-emerald-300 border border-emerald-900/60">
+            <div className="absolute bottom-3 right-3 bg-slate-950/80 px-2 py-1 rounded text-[11px] font-mono text-emerald-300 border border-emerald-900/60 pointer-events-none">
               Fringe Suppressed
             </div>
           </div>
@@ -169,11 +237,11 @@ export const CACorrector: React.FC = () => {
             <span className="text-slate-400">Split Position:</span>
             <input
               type="range"
-              min="5"
-              max="95"
+              min="2"
+              max="98"
               value={splitPos}
               onChange={(e) => setSplitPos(Number(e.target.value))}
-              className="flex-1 accent-indigo-500"
+              className="flex-1 accent-indigo-500 cursor-pointer"
             />
             <span className="font-mono text-slate-300 w-10 text-right">{splitPos}%</span>
           </div>
@@ -198,7 +266,7 @@ export const CACorrector: React.FC = () => {
                 max="24"
                 value={radius}
                 onChange={(e) => setRadius(Number(e.target.value))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-indigo-500 cursor-pointer"
               />
               <span className="text-[11px] text-slate-500 mt-0.5 block">
                 Window size for localized guided gradient estimation.
@@ -217,7 +285,7 @@ export const CACorrector: React.FC = () => {
                 step="0.05"
                 value={strength}
                 onChange={(e) => setStrength(Number(e.target.value))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-indigo-500 cursor-pointer"
               />
               <span className="text-[11px] text-slate-500 mt-0.5 block">
                 Magnitude of chromatic aberration shift vectors.
@@ -236,7 +304,7 @@ export const CACorrector: React.FC = () => {
                 step="0.02"
                 value={safety}
                 onChange={(e) => setSafety(Number(e.target.value))}
-                className="w-full accent-indigo-500"
+                className="w-full accent-indigo-500 cursor-pointer"
               />
               <span className="text-[11px] text-slate-500 mt-0.5 block">
                 Safety blending prevents edge blur on low-frequency regions.

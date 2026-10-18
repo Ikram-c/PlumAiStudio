@@ -1,8 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import {
-  Point2D,
-  GJKResult,
-} from '../types';
+import React, { useState, useMemo, useRef } from 'react';
+import { Point2D, GJKResult } from '../types';
 import {
   gjkNesterovAccelerated2D,
   polygonSupport,
@@ -11,7 +8,7 @@ import {
   getSelfIntersectingEight,
   getSeparatedShapes,
 } from '../lib/gjk';
-import { Shapes, RefreshCw, AlertTriangle, CheckCircle, ArrowRight } from 'lucide-react';
+import { Shapes, RefreshCw, Move } from 'lucide-react';
 
 export const GeometryVisualizer: React.FC = () => {
   const [activeFixture, setActiveFixture] = useState<'interactive' | 'eight' | 'separated'>('interactive');
@@ -19,13 +16,16 @@ export const GeometryVisualizer: React.FC = () => {
   const [useNesterov, setUseNesterov] = useState<boolean>(true);
 
   // Position of Shape A (Polygon) and Shape B (Circle / Box) in interactive mode
-  const [shapeAPos, setShapeAPos] = useState<Point2D>({ x: 120, y: 150 });
-  const [shapeBPos, setShapeBPos] = useState<Point2D>({ x: 280, y: 160 });
+  const [shapeAPos, setShapeAPos] = useState<Point2D>({ x: 140, y: 160 });
+  const [shapeBPos, setShapeBPos] = useState<Point2D>({ x: 300, y: 160 });
   const [shapeBType, setShapeBType] = useState<'box' | 'circle'>('box');
+
+  // Dragging state on canvas
+  const [draggingShape, setDraggingShape] = useState<'A' | 'B' | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
 
   // Compute GJK collision between interactive Shape A and Shape B
   const gjkResult: GJKResult = useMemo(() => {
-    // Polygon A: a five-vertex convex pentagon centered at shapeAPos
     const polyA: Point2D[] = [
       { x: shapeAPos.x, y: shapeAPos.y - 45 },
       { x: shapeAPos.x + 42, y: shapeAPos.y - 15 },
@@ -49,6 +49,29 @@ export const GeometryVisualizer: React.FC = () => {
   const eightFixture = useMemo(() => getSelfIntersectingEight(), []);
   const separated = useMemo(() => getSeparatedShapes(seed), [seed]);
 
+  // Pointer drag events on SVG
+  const handlePointerDown = (shape: 'A' | 'B', e: React.PointerEvent) => {
+    e.stopPropagation();
+    setDraggingShape(shape);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!draggingShape || !svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    const x = Math.round(e.clientX - rect.left);
+    const y = Math.round(e.clientY - rect.top);
+
+    if (draggingShape === 'A') {
+      setShapeAPos({ x: Math.min(500, Math.max(50, x)), y: Math.min(320, Math.max(50, y)) });
+    } else {
+      setShapeBPos({ x: Math.min(500, Math.max(50, x)), y: Math.min(320, Math.max(50, y)) });
+    }
+  };
+
+  const handlePointerUp = () => {
+    setDraggingShape(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -58,6 +81,9 @@ export const GeometryVisualizer: React.FC = () => {
             <div className="flex items-center gap-2">
               <Shapes className="w-5 h-5 text-indigo-400" />
               <h1 className="text-xl font-bold text-white tracking-tight">GJK 2D Collision & Distance Engine</h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60">
+                Interactive Canvas Dragging
+              </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
               Gilbert-Johnson-Keerthi (GJK) convex collision detection with Nesterov accelerated momentum.
@@ -100,14 +126,15 @@ export const GeometryVisualizer: React.FC = () => {
           {/* Canvas Display */}
           <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Interactive Minkowski Support Canvas
-              </span>
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+                <Move className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Drag Shapes Directly on Canvas</span>
+              </div>
               <div className="flex items-center gap-2 text-xs">
                 <span className="text-slate-400">Target Hull:</span>
                 <button
                   onClick={() => setShapeBType('box')}
-                  className={`px-2 py-0.5 rounded text-xs ${
+                  className={`px-2 py-0.5 rounded text-xs transition-colors ${
                     shapeBType === 'box' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'
                   }`}
                 >
@@ -115,7 +142,7 @@ export const GeometryVisualizer: React.FC = () => {
                 </button>
                 <button
                   onClick={() => setShapeBType('circle')}
-                  className={`px-2 py-0.5 rounded text-xs ${
+                  className={`px-2 py-0.5 rounded text-xs transition-colors ${
                     shapeBType === 'circle' ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'
                   }`}
                 >
@@ -124,16 +151,20 @@ export const GeometryVisualizer: React.FC = () => {
               </div>
             </div>
 
-            <div className="relative w-full h-[360px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex items-center justify-center">
-              {/* SVG Canvas for geometric shapes */}
-              <svg className="w-full h-full">
-                {/* Grid lines */}
+            <div className="relative w-full h-[360px] bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-inner flex items-center justify-center select-none">
+              <svg
+                ref={svgRef}
+                onPointerMove={handlePointerMove}
+                onPointerUp={handlePointerUp}
+                className="w-full h-full cursor-crosshair"
+              >
+                {/* Background grid */}
                 <defs>
-                  <pattern id="grid" width="30" height="30" patternUnits="userSpaceOnUse">
-                    <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.04)" strokeWidth="1" />
+                  <pattern id="grid-interactive" width="30" height="30" patternUnits="userSpaceOnUse">
+                    <path d="M 30 0 L 0 0 0 30" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
                   </pattern>
                 </defs>
-                <rect width="100%" height="100%" fill="url(#grid)" />
+                <rect width="100%" height="100%" fill="url(#grid-interactive)" />
 
                 {/* Distance Connector between centroids */}
                 <line
@@ -146,50 +177,62 @@ export const GeometryVisualizer: React.FC = () => {
                   strokeDasharray="4 4"
                 />
 
+                {/* Distance label pill */}
+                <g transform={`translate(${(shapeAPos.x + shapeBPos.x) / 2}, ${(shapeAPos.y + shapeBPos.y) / 2 - 12})`}>
+                  <rect x="-35" y="-10" width="70" height="20" rx="4" fill="#0f172a" stroke="#334155" strokeWidth="1" />
+                  <text x="0" y="4" fill={gjkResult.intersecting ? '#ef4444' : '#34d399'} fontSize="11" textAnchor="middle" fontFamily="monospace">
+                    {gjkResult.distance.toFixed(1)} px
+                  </text>
+                </g>
+
                 {/* Shape A: Pentagon */}
-                <polygon
-                  points={`${shapeAPos.x},${shapeAPos.y - 45} ${shapeAPos.x + 42},${shapeAPos.y - 15} ${
-                    shapeAPos.x + 28
-                  },${shapeAPos.y + 40} ${shapeAPos.x - 28},${shapeAPos.y + 40} ${shapeAPos.x - 42},${shapeAPos.y - 15}`}
-                  fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(99, 102, 241, 0.25)'}
-                  stroke={gjkResult.intersecting ? '#ef4444' : '#818cf8'}
-                  strokeWidth="2.5"
-                />
-                <circle cx={shapeAPos.x} cy={shapeAPos.y} r="3" fill="#818cf8" />
-                <text x={shapeAPos.x} y={shapeAPos.y + 55} fill="#a5b4fc" fontSize="11" textAnchor="middle">
-                  Shape A (Convex Poly)
-                </text>
+                <g onPointerDown={(e) => handlePointerDown('A', e)} className="cursor-grab active:cursor-grabbing">
+                  <polygon
+                    points={`${shapeAPos.x},${shapeAPos.y - 45} ${shapeAPos.x + 42},${shapeAPos.y - 15} ${
+                      shapeAPos.x + 28
+                    },${shapeAPos.y + 40} ${shapeAPos.x - 28},${shapeAPos.y + 40} ${shapeAPos.x - 42},${shapeAPos.y - 15}`}
+                    fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(99, 102, 241, 0.25)'}
+                    stroke={gjkResult.intersecting ? '#ef4444' : '#818cf8'}
+                    strokeWidth="2.5"
+                  />
+                  <circle cx={shapeAPos.x} cy={shapeAPos.y} r="4" fill="#818cf8" />
+                  <text x={shapeAPos.x} y={shapeAPos.y + 55} fill="#a5b4fc" fontSize="11" textAnchor="middle">
+                    Shape A (Drag)
+                  </text>
+                </g>
 
                 {/* Shape B: Box or Circle */}
-                {shapeBType === 'box' ? (
-                  <rect
-                    x={shapeBPos.x - 40}
-                    y={shapeBPos.y - 35}
-                    width="80"
-                    height="70"
-                    rx="4"
-                    fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}
-                    stroke={gjkResult.intersecting ? '#ef4444' : '#34d399'}
-                    strokeWidth="2.5"
-                  />
-                ) : (
-                  <circle
-                    cx={shapeBPos.x}
-                    cy={shapeBPos.y}
-                    r="38"
-                    fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}
-                    stroke={gjkResult.intersecting ? '#ef4444' : '#34d399'}
-                    strokeWidth="2.5"
-                  />
-                )}
-                <circle cx={shapeBPos.x} cy={shapeBPos.y} r="3" fill="#34d399" />
-                <text x={shapeBPos.x} y={shapeBPos.y + 55} fill="#6ee7b7" fontSize="11" textAnchor="middle">
-                  Shape B ({shapeBType.toUpperCase()})
-                </text>
+                <g onPointerDown={(e) => handlePointerDown('B', e)} className="cursor-grab active:cursor-grabbing">
+                  {shapeBType === 'box' ? (
+                    <rect
+                      x={shapeBPos.x - 40}
+                      y={shapeBPos.y - 35}
+                      width="80"
+                      height="70"
+                      rx="4"
+                      fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}
+                      stroke={gjkResult.intersecting ? '#ef4444' : '#34d399'}
+                      strokeWidth="2.5"
+                    />
+                  ) : (
+                    <circle
+                      cx={shapeBPos.x}
+                      cy={shapeBPos.y}
+                      r="38"
+                      fill={gjkResult.intersecting ? 'rgba(239, 68, 68, 0.25)' : 'rgba(16, 185, 129, 0.25)'}
+                      stroke={gjkResult.intersecting ? '#ef4444' : '#34d399'}
+                      strokeWidth="2.5"
+                    />
+                  )}
+                  <circle cx={shapeBPos.x} cy={shapeBPos.y} r="4" fill="#34d399" />
+                  <text x={shapeBPos.x} y={shapeBPos.y + 55} fill="#6ee7b7" fontSize="11" textAnchor="middle">
+                    Shape B (Drag)
+                  </text>
+                </g>
               </svg>
             </div>
 
-            {/* Slider controls to move shapes */}
+            {/* Range sliders fallback */}
             <div className="mt-4 grid grid-cols-2 gap-4 text-xs">
               <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
                 <span className="font-medium text-slate-300">Shape A Position (X / Y):</span>
@@ -198,10 +241,10 @@ export const GeometryVisualizer: React.FC = () => {
                   <input
                     type="range"
                     min="60"
-                    max="220"
+                    max="450"
                     value={shapeAPos.x}
                     onChange={(e) => setShapeAPos((p) => ({ ...p, x: Number(e.target.value) }))}
-                    className="flex-1 accent-indigo-500"
+                    className="flex-1 accent-indigo-500 cursor-pointer"
                   />
                   <span className="w-8 font-mono text-slate-400">{shapeAPos.x}</span>
                 </div>
@@ -209,11 +252,11 @@ export const GeometryVisualizer: React.FC = () => {
                   <span className="text-slate-500 w-4">Y:</span>
                   <input
                     type="range"
-                    min="80"
-                    max="280"
+                    min="60"
+                    max="300"
                     value={shapeAPos.y}
                     onChange={(e) => setShapeAPos((p) => ({ ...p, y: Number(e.target.value) }))}
-                    className="flex-1 accent-indigo-500"
+                    className="flex-1 accent-indigo-500 cursor-pointer"
                   />
                   <span className="w-8 font-mono text-slate-400">{shapeAPos.y}</span>
                 </div>
@@ -225,11 +268,11 @@ export const GeometryVisualizer: React.FC = () => {
                   <span className="text-slate-500 w-4">X:</span>
                   <input
                     type="range"
-                    min="180"
+                    min="60"
                     max="450"
                     value={shapeBPos.x}
                     onChange={(e) => setShapeBPos((p) => ({ ...p, x: Number(e.target.value) }))}
-                    className="flex-1 accent-emerald-500"
+                    className="flex-1 accent-emerald-500 cursor-pointer"
                   />
                   <span className="w-8 font-mono text-slate-400">{shapeBPos.x}</span>
                 </div>
@@ -237,11 +280,11 @@ export const GeometryVisualizer: React.FC = () => {
                   <span className="text-slate-500 w-4">Y:</span>
                   <input
                     type="range"
-                    min="80"
-                    max="280"
+                    min="60"
+                    max="300"
                     value={shapeBPos.y}
                     onChange={(e) => setShapeBPos((p) => ({ ...p, y: Number(e.target.value) }))}
-                    className="flex-1 accent-emerald-500"
+                    className="flex-1 accent-emerald-500 cursor-pointer"
                   />
                   <span className="w-8 font-mono text-slate-400">{shapeBPos.y}</span>
                 </div>
@@ -255,7 +298,7 @@ export const GeometryVisualizer: React.FC = () => {
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <h3 className="text-sm font-bold text-white">Solver Diagnostics</h3>
                 <span
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold ${
+                  className={`px-2.5 py-1 rounded text-xs font-mono font-bold ${
                     gjkResult.intersecting
                       ? 'bg-red-950/80 text-red-300 border border-red-700/60'
                       : 'bg-emerald-950/80 text-emerald-300 border border-emerald-700/60'
@@ -275,7 +318,7 @@ export const GeometryVisualizer: React.FC = () => {
 
                 <div className="flex justify-between py-1 border-b border-slate-800/60">
                   <span className="text-slate-400">Euclidean Distance</span>
-                  <span className="font-mono font-bold text-indigo-300">
+                  <span className="font-mono font-bold text-indigo-300 text-sm">
                     {gjkResult.distance.toFixed(3)} px
                   </span>
                 </div>
@@ -306,7 +349,7 @@ export const GeometryVisualizer: React.FC = () => {
             </div>
 
             <div className="mt-6 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs text-slate-400 leading-relaxed">
-              <span className="font-medium text-slate-300 block mb-1">Minkowski Difference (A ⊖ B):</span>
+              <span className="font-semibold text-slate-300 block mb-1">Minkowski Difference (A ⊖ B):</span>
               GJK computes the support mapping along direction vectors. Nesterov acceleration incorporates momentum
               step <code className="text-indigo-400 font-mono">(i+1)/(i+3)</code> to converge in 30% fewer iterations.
             </div>

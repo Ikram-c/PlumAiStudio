@@ -5,24 +5,62 @@ import {
   BarChart3,
   Download,
   Upload,
-  Info,
-  Layers,
-  Maximize2,
-  PieChart,
+  Search,
+  ArrowUpDown,
   FileSpreadsheet,
+  FileJson,
 } from 'lucide-react';
+import { DashboardResearchSection } from './DashboardResearchSection';
 
 interface COCODashboardProps {
   dataset: COCODataset;
   onUploadDataset: (dataset: COCODataset) => void;
+  onNavigateToResearch?: () => void;
 }
 
-export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadDataset }) => {
+type SortField = 'category' | 'count' | 'percentage' | 'avgArea' | 'avgAspectRatio' | 'minArea' | 'maxArea';
+
+export const COCODashboard: React.FC<COCODashboardProps> = ({
+  dataset,
+  onUploadDataset,
+  onNavigateToResearch,
+}) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [activeChart, setActiveChart] = useState<'overview' | 'area' | 'aspect_ratio' | 'scatter' | 'per_image'>('overview');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [sortField, setSortField] = useState<SortField>('count');
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
 
-  const summaries = useMemo(() => extractCategorySummary(dataset), [dataset]);
+  const rawSummaries = useMemo(() => extractCategorySummary(dataset), [dataset]);
   const categories = useMemo(() => ['All', ...dataset.categories.map((c) => c.name)], [dataset]);
+
+  // Sort and search summaries
+  const summaries = useMemo(() => {
+    let result = rawSummaries;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((s) => s.category.toLowerCase().includes(q));
+    }
+    return [...result].sort((a, b) => {
+      let valA = a[sortField];
+      let valB = b[sortField];
+      if (typeof valA === 'string') {
+        return sortAsc
+          ? (valA as string).localeCompare(valB as string)
+          : (valB as string).localeCompare(valA as string);
+      }
+      return sortAsc ? (valA as number) - (valB as number) : (valB as number) - (valA as number);
+    });
+  }, [rawSummaries, searchQuery, sortField, sortAsc]);
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(false);
+    }
+  };
 
   // Filter annotations based on category
   const filteredAnnotations = useMemo(() => {
@@ -31,7 +69,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
     return cat ? dataset.annotations.filter((a) => a.category_id === cat.id) : dataset.annotations;
   }, [dataset, selectedCategory]);
 
-  // Compute histograms
+  // Histograms
   const areaBins = useMemo(() => {
     const areas = filteredAnnotations.map((a) => a.area || a.bbox[2] * a.bbox[3]).filter((a) => a > 0);
     if (!areas.length) return [];
@@ -42,8 +80,6 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
     const bins = Array.from({ length: numBins }, (_, i) => ({
       label: `${Math.round(min + i * binSize).toLocaleString()}`,
       count: 0,
-      rangeMin: min + i * binSize,
-      rangeMax: min + (i + 1) * binSize,
     }));
     areas.forEach((val) => {
       const idx = Math.min(numBins - 1, Math.floor((val - min) / binSize));
@@ -108,7 +144,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
 
   const exportSummaryCsv = () => {
     const headers = 'category,count,percentage,avg_area,avg_aspect_ratio,min_area,max_area\n';
-    const rows = summaries
+    const rows = rawSummaries
       .map(
         (s) =>
           `"${s.category}",${s.count},${s.percentage.toFixed(2)},${s.avgArea},${s.avgAspectRatio},${s.minArea},${s.maxArea}`
@@ -119,6 +155,17 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
     const a = document.createElement('a');
     a.href = url;
     a.download = 'coco_category_summary.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportFullCocoJson = () => {
+    const jsonStr = JSON.stringify(dataset, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dataset_coco.json';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -135,25 +182,36 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
           <div className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-violet-400" />
             <h1 className="text-xl font-bold text-white tracking-tight">COCO Annotation Dashboard</h1>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-800/60">
+              Interactive Analytics
+            </span>
           </div>
           <p className="text-sm text-slate-400 mt-1">
-            Interactive Plotly-inspired analytics for bounding box distributions, aspect ratios, and spatial properties.
+            Interactive analytics for bounding box distributions, aspect ratios, and spatial properties.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <label className="cursor-pointer inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors">
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors">
             <Upload className="w-3.5 h-3.5" />
-            <span>Upload COCO JSON</span>
+            <span>Upload JSON</span>
             <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
           </label>
 
           <button
             onClick={exportSummaryCsv}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white text-xs font-medium shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Export Summary CSV</span>
+            <span>CSV Summary</span>
+          </button>
+
+          <button
+            onClick={exportFullCocoJson}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white text-xs font-medium shadow-sm transition-colors"
+          >
+            <FileJson className="w-3.5 h-3.5" />
+            <span>Export COCO JSON</span>
           </button>
         </div>
       </div>
@@ -180,8 +238,8 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
         <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
           <span className="text-xs font-medium text-slate-400">Avg Bounding Box Area</span>
           <p className="text-2xl font-bold text-white mt-1">
-            {summaries.length
-              ? Math.round(summaries.reduce((acc, s) => acc + s.avgArea * s.count, 0) / (totalAnnotations || 1)).toLocaleString()
+            {rawSummaries.length
+              ? Math.round(rawSummaries.reduce((acc, s) => acc + s.avgArea * s.count, 0) / (totalAnnotations || 1)).toLocaleString()
               : 0}
             <span className="text-xs font-normal text-slate-400 ml-1">px²</span>
           </p>
@@ -241,7 +299,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
             <select
               value={selectedCategory}
               onChange={(e) => setSelectedCategory(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500"
+              className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-violet-500 cursor-pointer"
             >
               {categories.map((c) => (
                 <option key={c} value={c}>
@@ -263,8 +321,8 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
                 <span className="text-xs text-slate-500">Sorted by frequency</span>
               </div>
               <div className="space-y-3">
-                {summaries.map((cat, i) => {
-                  const maxCount = summaries[0]?.count || 1;
+                {rawSummaries.map((cat, i) => {
+                  const maxCount = rawSummaries[0]?.count || 1;
                   const barWidth = `${Math.max(4, (cat.count / maxCount) * 100)}%`;
                   return (
                     <div key={cat.categoryId} className="space-y-1">
@@ -309,7 +367,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
                   const heightPct = Math.max(8, (bin.count / maxBin) * 100);
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
-                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10">
+                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10 pointer-events-none">
                         {bin.count} annotations
                       </div>
                       <div
@@ -340,7 +398,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
                   const heightPct = Math.max(8, (bin.count / maxBin) * 100);
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
-                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10">
+                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10 pointer-events-none">
                         {bin.count} annotations
                       </div>
                       <div
@@ -366,12 +424,10 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
                 <span className="text-xs text-slate-500">{filteredAnnotations.length} points plotted</span>
               </div>
               <div className="h-64 bg-slate-950 border border-slate-800 rounded-xl relative overflow-hidden p-4">
-                {/* SVG Scatter Plot */}
                 <svg className="w-full h-full overflow-visible">
                   {filteredAnnotations.map((ann, i) => {
                     const area = ann.area || ann.bbox[2] * ann.bbox[3];
                     const ar = ann.bbox[3] > 0 ? ann.bbox[2] / ann.bbox[3] : 1;
-                    // Normalized to canvas coords
                     const xPct = Math.min(95, Math.max(5, (ar / 4.0) * 100));
                     const maxArea = 800000;
                     const yPct = Math.min(95, Math.max(5, 100 - (area / maxArea) * 100));
@@ -413,7 +469,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
                   const heightPct = Math.max(8, (bin.count / maxBin) * 100);
                   return (
                     <div key={i} className="flex-1 flex flex-col items-center gap-1 group relative">
-                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10">
+                      <div className="absolute -top-7 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-[10px] text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap z-10 pointer-events-none">
                         {bin.count} images
                       </div>
                       <div
@@ -432,30 +488,85 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({ dataset, onUploadD
         </div>
       </div>
 
-      {/* Category Summary Data Table */}
+      {/* Google Search Grounded CV Research & Industry News */}
+      <DashboardResearchSection
+        onOpenFullHub={onNavigateToResearch}
+        datasetCategoryCount={dataset.categories.length}
+      />
+
+      {/* Category Summary Data Table with Search & Interactive Column Sorting */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
-        <div className="flex items-center gap-2 mb-4">
-          <FileSpreadsheet className="w-4 h-4 text-violet-400" />
-          <h2 className="text-base font-bold text-white">Category Summary Metrics</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-violet-400" />
+            <h2 className="text-base font-bold text-white">Category Summary Metrics</h2>
+          </div>
+
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search category..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500"
+            />
+          </div>
         </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">
+            <thead className="bg-slate-950 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider select-none">
               <tr>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">Count</th>
-                <th className="py-3 px-4">Share (%)</th>
-                <th className="py-3 px-4">Avg Area (px²)</th>
-                <th className="py-3 px-4">Avg Aspect Ratio</th>
-                <th className="py-3 px-4">Min Area</th>
-                <th className="py-3 px-4">Max Area</th>
+                <th onClick={() => handleSort('category')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Category</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('count')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Count</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('percentage')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Share (%)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('avgArea')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Avg Area (px²)</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('avgAspectRatio')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Avg Aspect Ratio</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('minArea')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Min Area</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
+                <th onClick={() => handleSort('maxArea')} className="py-3 px-4 cursor-pointer hover:text-white">
+                  <div className="flex items-center gap-1">
+                    <span>Max Area</span>
+                    <ArrowUpDown className="w-3 h-3 text-slate-500" />
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono">
               {summaries.map((row) => (
                 <tr key={row.categoryId} className="hover:bg-slate-800/40 transition-colors">
                   <td className="py-3 px-4 font-sans font-medium text-white">{row.category}</td>
-                  <td className="py-3 px-4 text-violet-300">{row.count}</td>
+                  <td className="py-3 px-4 text-violet-300 font-semibold">{row.count}</td>
                   <td className="py-3 px-4">{row.percentage.toFixed(1)}%</td>
                   <td className="py-3 px-4">{row.avgArea.toLocaleString()}</td>
                   <td className="py-3 px-4">{row.avgAspectRatio}</td>

@@ -8,11 +8,15 @@ import {
   SlidersHorizontal,
   Video,
   Layers,
-  FileCode,
+  Wand2,
+  BookOpen,
 } from 'lucide-react';
+import { AuthBar } from './AuthBar';
 
 export type TabId =
   | 'dashboard'
+  | 'research'
+  | 'ai-studio'
   | 'heatmap'
   | 'geometry'
   | 'coco-tools'
@@ -36,6 +40,8 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const navItems: { id: TabId; label: string; icon: React.ReactNode; badge?: string }[] = [
     { id: 'dashboard', label: 'COCO Stats', icon: <BarChart3 className="w-4 h-4" /> },
+    { id: 'research', label: 'Research & News', icon: <BookOpen className="w-4 h-4" />, badge: 'Google Search' },
+    { id: 'ai-studio', label: 'AI Image Studio', icon: <Wand2 className="w-4 h-4" /> },
     { id: 'heatmap', label: 'BBox Heatmap', icon: <Flame className="w-4 h-4" /> },
     { id: 'geometry', label: 'GJK 2D Geometry', icon: <Shapes className="w-4 h-4" /> },
     { id: 'coco-tools', label: 'Overlap & Slicing', icon: <Scissors className="w-4 h-4" /> },
@@ -67,28 +73,32 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Dataset Switcher & Presets */}
-          <div className="flex items-center gap-2">
-            <div className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 text-xs text-slate-300">
+          {/* Dataset Switcher, Presets & Auth */}
+          <div className="flex items-center gap-3">
+            <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 text-xs text-slate-300">
               <span className="text-slate-500">Active:</span>
-              <span className="font-medium text-violet-300 truncate max-w-[160px]">{datasetName}</span>
+              <span className="font-medium text-violet-300 truncate max-w-[140px]">{datasetName}</span>
             </div>
-            <div className="flex items-center bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60 text-xs">
+
+            <div className="hidden sm:flex items-center bg-slate-800/80 p-0.5 rounded-lg border border-slate-700/60 text-xs">
               <button
                 onClick={() => onSelectDatasetPreset('marine')}
-                className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors"
+                className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors cursor-pointer"
                 title="Underwater Benthic Coral Reef Dataset"
               >
-                Marine Survey
+                Marine
               </button>
               <button
                 onClick={() => onSelectDatasetPreset('drone')}
-                className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors"
+                className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors cursor-pointer"
                 title="Offshore Drone Inspection Dataset"
               >
-                Drone Aerial
+                Drone
               </button>
             </div>
+
+            {/* Firebase Auth Google Sign-In Bar */}
+            <AuthBar />
           </div>
         </div>
 
@@ -100,7 +110,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer ${
                   isActive
                     ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/25'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
@@ -108,6 +118,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               >
                 {item.icon}
                 <span>{item.label}</span>
+                {item.badge && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-400/20 text-indigo-200 border border-indigo-400/30">
+                    {item.badge}
+                  </span>
+                )}
               </button>
             );
           })}

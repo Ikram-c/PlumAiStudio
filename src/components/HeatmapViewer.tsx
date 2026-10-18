@@ -1,12 +1,49 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { COCODataset } from '../types';
-import { Flame, Eye, EyeOff, Sliders, Palette, ZoomIn, Info } from 'lucide-react';
+import { Flame, Sliders, Palette, Info } from 'lucide-react';
 
 interface HeatmapViewerProps {
   dataset: COCODataset;
 }
 
 type ColormapName = 'Viridis' | 'Plasma' | 'Inferno' | 'Magma' | 'Hot';
+
+// Precomputed 256-entry Color Lookup Tables for instant pixel mapping
+function generateColormapLUT(map: ColormapName): Uint8Array {
+  const lut = new Uint8Array(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    const t = i / 255.0;
+    let r = 0, g = 0, b = 0;
+
+    if (map === 'Viridis') {
+      r = Math.round(255 * (t < 0.5 ? 0.27 + t * 0.4 : 0.47 + (t - 0.5) * 1.06));
+      g = Math.round(255 * (t < 0.5 ? 0.0 + t * 1.2 : 0.6 + (t - 0.5) * 0.8));
+      b = Math.round(255 * (t < 0.5 ? 0.33 + t * 0.6 : 0.63 - (t - 0.5) * 1.2));
+    } else if (map === 'Plasma') {
+      r = Math.round(255 * Math.sin(t * Math.PI * 0.8 + 0.1) * 0.9 + 25);
+      g = Math.round(255 * Math.pow(t, 1.8) * 0.9);
+      b = Math.round(255 * (1 - t * 0.8));
+    } else if (map === 'Inferno') {
+      r = Math.round(255 * Math.min(1, t * 1.6));
+      g = Math.round(255 * Math.max(0, (t - 0.3) * 1.4));
+      b = Math.round(255 * Math.max(0, 0.4 - Math.abs(t - 0.3) * 1.2));
+    } else if (map === 'Hot') {
+      r = Math.round(255 * Math.min(1, t * 2.5));
+      g = Math.round(255 * Math.max(0, (t - 0.35) * 1.8));
+      b = Math.round(255 * Math.max(0, (t - 0.75) * 4));
+    } else {
+      // Magma
+      r = Math.round(255 * (t < 0.5 ? t * 1.6 : 0.8 + (t - 0.5) * 0.4));
+      g = Math.round(255 * Math.pow(t, 2.2));
+      b = Math.round(255 * (t < 0.5 ? 0.2 + t * 0.8 : 0.6 - (t - 0.5) * 0.8));
+    }
+
+    lut[i * 3] = Math.min(255, Math.max(0, r));
+    lut[i * 3 + 1] = Math.min(255, Math.max(0, g));
+    lut[i * 3 + 2] = Math.min(255, Math.max(0, b));
+  }
+  return lut;
+}
 
 export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
   const [colormap, setColormap] = useState<ColormapName>('Viridis');
@@ -38,7 +75,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
       });
   }, [dataset]);
 
-  // Determine bounds from dataset images or bboxes
+  // Determine viewport bounds from dataset images or bboxes
   useEffect(() => {
     if (dataset.images.length > 0) {
       const maxW = Math.max(...dataset.images.map((img) => img.width || 1920));
@@ -48,45 +85,10 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
     }
   }, [dataset]);
 
-  // Colormap color sampler function (t in [0, 1])
-  const sampleColormap = (t: number, map: ColormapName): [number, number, number] => {
-    t = Math.max(0, Math.min(1, t));
-    if (map === 'Viridis') {
-      // Dark purple -> teal -> yellow
-      const r = Math.round(255 * (t < 0.5 ? 0.27 + t * 0.4 : 0.47 + (t - 0.5) * 1.06));
-      const g = Math.round(255 * (t < 0.5 ? 0.0 + t * 1.2 : 0.6 + (t - 0.5) * 0.8));
-      const b = Math.round(255 * (t < 0.5 ? 0.33 + t * 0.6 : 0.63 - (t - 0.5) * 1.2));
-      return [r, g, b];
-    }
-    if (map === 'Plasma') {
-      // Blue -> purple -> orange -> yellow
-      const r = Math.round(255 * Math.sin(t * Math.PI * 0.8 + 0.1) * 0.9 + 25);
-      const g = Math.round(255 * Math.pow(t, 1.8) * 0.9);
-      const b = Math.round(255 * (1 - t * 0.8));
-      return [r, g, b];
-    }
-    if (map === 'Inferno') {
-      // Black -> purple -> orange -> bright yellow
-      const r = Math.round(255 * Math.min(1, t * 1.6));
-      const g = Math.round(255 * Math.max(0, (t - 0.3) * 1.4));
-      const b = Math.round(255 * Math.max(0, 0.4 - Math.abs(t - 0.3) * 1.2));
-      return [r, g, b];
-    }
-    if (map === 'Hot') {
-      // Black -> red -> yellow -> white
-      const r = Math.round(255 * Math.min(1, t * 2.5));
-      const g = Math.round(255 * Math.max(0, (t - 0.35) * 1.8));
-      const b = Math.round(255 * Math.max(0, (t - 0.75) * 4));
-      return [r, g, b];
-    }
-    // Magma
-    const r = Math.round(255 * (t < 0.5 ? t * 1.6 : 0.8 + (t - 0.5) * 0.4));
-    const g = Math.round(255 * Math.pow(t, 2.2));
-    const b = Math.round(255 * (t < 0.5 ? 0.2 + t * 0.8 : 0.6 - (t - 0.5) * 0.8));
-    return [r, g, b];
-  };
+  // Memoize LUT for chosen colormap
+  const colormapLUT = useMemo(() => generateColormapLUT(colormap), [colormap]);
 
-  // Render heatmap to canvas with 2D Gaussian Kernel density estimation
+  // Render heatmap with Separable 1D Gaussian passes (O(2K) vs O(K^2))
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -104,62 +106,67 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
       densityGrid[gy * gridW + gx] += 1.0;
     });
 
-    // 2D Gaussian Kernel filter simulation
-    const smoothed = new Float32Array(gridW * gridH);
-    const kernelRadius = Math.ceil(sigma * 4);
-    const kernelWeight: number[] = [];
+    // Compute 1D Gaussian kernel
+    const kernelRadius = Math.max(1, Math.ceil(sigma * 4));
+    const kernelSize = 2 * kernelRadius + 1;
+    const kernel1D = new Float32Array(kernelSize);
     let kernelSum = 0;
+    for (let i = -kernelRadius; i <= kernelRadius; i++) {
+      const w = Math.exp(-(i * i) / (2 * sigma * sigma));
+      kernel1D[i + kernelRadius] = w;
+      kernelSum += w;
+    }
+    for (let i = 0; i < kernelSize; i++) {
+      kernel1D[i] /= kernelSum;
+    }
 
-    for (let dy = -kernelRadius; dy <= kernelRadius; dy++) {
-      for (let dx = -kernelRadius; dx <= kernelRadius; dx++) {
-        const distSq = dx * dx + dy * dy;
-        const w = Math.exp(-distSq / (2 * sigma * sigma));
-        kernelWeight.push(w);
-        kernelSum += w;
+    // Pass 1: Horizontal 1D Gaussian Blur
+    const tempH = new Float32Array(gridW * gridH);
+    for (let y = 0; y < gridH; y++) {
+      const rowOffset = y * gridW;
+      for (let x = 0; x < gridW; x++) {
+        let acc = 0;
+        for (let k = -kernelRadius; k <= kernelRadius; k++) {
+          const nx = Math.min(gridW - 1, Math.max(0, x + k));
+          acc += densityGrid[rowOffset + nx] * kernel1D[k + kernelRadius];
+        }
+        tempH[rowOffset + x] = acc;
       }
     }
 
+    // Pass 2: Vertical 1D Gaussian Blur
+    const smoothed = new Float32Array(gridW * gridH);
     let maxDensity = 0;
     for (let y = 0; y < gridH; y++) {
+      const rowOffset = y * gridW;
       for (let x = 0; x < gridW; x++) {
-        let val = 0;
-        let kIdx = 0;
-        for (let dy = -kernelRadius; dy <= kernelRadius; dy++) {
-          const ny = y + dy;
-          if (ny < 0 || ny >= gridH) {
-            kIdx += 2 * kernelRadius + 1;
-            continue;
-          }
-          for (let dx = -kernelRadius; dx <= kernelRadius; dx++) {
-            const nx = x + dx;
-            if (nx >= 0 && nx < gridW) {
-              val += densityGrid[ny * gridW + nx] * kernelWeight[kIdx];
-            }
-            kIdx++;
-          }
+        let acc = 0;
+        for (let k = -kernelRadius; k <= kernelRadius; k++) {
+          const ny = Math.min(gridH - 1, Math.max(0, y + k));
+          acc += tempH[ny * gridW + x] * kernel1D[k + kernelRadius];
         }
-        val /= kernelSum;
-        smoothed[y * gridW + x] = val;
-        if (val > maxDensity) maxDensity = val;
+        smoothed[rowOffset + x] = acc;
+        if (acc > maxDensity) maxDensity = acc;
       }
     }
 
-    // Render smoothed density map to offscreen ImageData
+    // Render smoothed density map with 256-LUT lookup
     const imgData = ctx.createImageData(gridW, gridH);
     const denom = maxDensity > 0 ? maxDensity : 1;
+    const lut = colormapLUT;
 
     for (let i = 0; i < gridW * gridH; i++) {
-      const normalized = smoothed[i] / denom;
-      const [r, g, b] = sampleColormap(normalized, colormap);
+      const normVal = Math.min(255, Math.max(0, Math.round((smoothed[i] / denom) * 255)));
+      const lutIdx = normVal * 3;
       const pixelIdx = i * 4;
-      imgData.data[pixelIdx] = r;
-      imgData.data[pixelIdx + 1] = g;
-      imgData.data[pixelIdx + 2] = b;
+
+      imgData.data[pixelIdx] = lut[lutIdx];
+      imgData.data[pixelIdx + 1] = lut[lutIdx + 1];
+      imgData.data[pixelIdx + 2] = lut[lutIdx + 2];
       // Fade out background where density is near zero
-      imgData.data[pixelIdx + 3] = normalized < 0.02 ? 30 : Math.round(180 + normalized * 75);
+      imgData.data[pixelIdx + 3] = normVal < 6 ? 25 : Math.min(255, Math.round(170 + normVal * 0.33));
     }
 
-    // Draw to main canvas with smooth interpolation
     canvas.width = 960;
     canvas.height = 540;
 
@@ -167,7 +174,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
     ctx.fillStyle = '#090d16';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw offscreen bitmap scaled up
+    // Fast scale-up drawing
     const offscreen = document.createElement('canvas');
     offscreen.width = gridW;
     offscreen.height = gridH;
@@ -187,7 +194,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
     const scaleY = canvas.height / canvasHeight;
 
     if (showBoxes) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.lineWidth = 1.5;
       boxes.forEach((b) => {
         ctx.strokeRect(b.x0 * scaleX, b.y0 * scaleY, b.w * scaleX, b.h * scaleY);
@@ -200,7 +207,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
         const py = b.cy * scaleY;
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
-        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = '#000000';
         ctx.lineWidth = 1;
@@ -208,8 +215,8 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
       });
     }
 
-    // Grid coordinates lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+    // Grid coordinates
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
     ctx.lineWidth = 1;
     for (let gx = 0; gx < canvas.width; gx += canvas.width / 4) {
       ctx.beginPath();
@@ -223,7 +230,7 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
       ctx.lineTo(canvas.width, gy);
       ctx.stroke();
     }
-  }, [boxes, canvasWidth, canvasHeight, colormap, sigma, visibility]);
+  }, [boxes, canvasWidth, canvasHeight, colormapLUT, sigma, visibility]);
 
   const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -232,13 +239,12 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
     const x = ((e.clientX - rect.left) / rect.width) * canvasWidth;
     const y = ((e.clientY - rect.top) / rect.height) * canvasHeight;
 
-    // Approximate density by counting boxes near point
     let nearCount = 0;
-    const searchRadius = canvasWidth * 0.08;
+    const searchRadiusSq = Math.pow(canvasWidth * 0.08, 2);
     boxes.forEach((b) => {
       const dx = b.cx - x;
       const dy = b.cy - y;
-      if (dx * dx + dy * dy < searchRadius * searchRadius) nearCount++;
+      if (dx * dx + dy * dy < searchRadiusSq) nearCount++;
     });
 
     setHoverInfo({
@@ -257,6 +263,9 @@ export const HeatmapViewer: React.FC<HeatmapViewerProps> = ({ dataset }) => {
             <div className="flex items-center gap-2">
               <Flame className="w-5 h-5 text-amber-400" />
               <h1 className="text-xl font-bold text-white tracking-tight">Bounding Box Density Heatmap</h1>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-950 text-indigo-300 border border-indigo-800/60">
+                Separable 1D Kernel (Fast)
+              </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
               Continuous 2D spatial density estimation of annotation centers with Gaussian kernel smoothing.
