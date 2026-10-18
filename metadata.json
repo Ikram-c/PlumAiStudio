@@ -1,0 +1,8 @@
+{
+  "name": "Plum Image Tools",
+  "description": "Monorepo web suite for computer vision, COCO dataset analysis, bounding box density heatmaps, GJK geometric collision detection, image quality profiling, and chromatic aberration correction.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
