@@ -58,6 +58,47 @@ export interface OverlapResult {
   validAnnotations: COCOAnnotation[];
 }
 
+export type AnnotationErrorType =
+  | 'missing_bbox'
+  | 'zero_area'
+  | 'conflicting_overlap'
+  | 'out_of_bounds'
+  | 'orphan_reference';
+
+export interface AnnotationErrorIssue {
+  id: string;
+  annotationId: number;
+  secondaryAnnotationId?: number;
+  imageId: number;
+  imageFileName?: string;
+  type: AnnotationErrorType;
+  severity: 'critical' | 'warning';
+  categoryName: string;
+  secondaryCategoryName?: string;
+  iou?: number;
+  containment?: number;
+  bbox?: number[];
+  area?: number;
+  message: string;
+  suggestedFix: string;
+}
+
+export interface DatasetAuditResult {
+  totalScanned: number;
+  healthyCount: number;
+  healthScore: number;
+  issues: AnnotationErrorIssue[];
+  countsByType: {
+    missing_bbox: number;
+    zero_area: number;
+    conflicting_overlap: number;
+    out_of_bounds: number;
+    orphan_reference: number;
+  };
+  cleanAnnotations: COCOAnnotation[];
+  repairedAnnotations: COCOAnnotation[];
+}
+
 export interface ExposureAnalysis {
   avgLuminance: number;
   medianLuminance: number;

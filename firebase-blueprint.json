@@ -33,14 +33,14 @@
     },
     "AnalysisRecord": {
       "title": "AnalysisRecord",
-      "description": "Persisted analysis history",
+      "description": "Persisted analysis and research history",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
         "userId": { "type": "string", "maxLength": 128 },
-        "type": { "type": "string", "enum": ["exposure", "frequency", "gjk", "overlap"] },
+        "type": { "type": "string", "enum": ["exposure", "frequency", "gjk", "overlap", "research"] },
         "title": { "type": "string", "maxLength": 128 },
-        "summary": { "type": "string", "maxLength": 512 },
+        "summary": { "type": "string", "maxLength": 1024 },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "type", "title", "createdAt"]
@@ -71,7 +71,7 @@
     },
     "/users/{userId}/analysisRecords/{recordId}": {
       "schema": "AnalysisRecord",
-      "description": "User saved diagnostics"
+      "description": "User saved diagnostics and grounded research digests"
     },
     "/users/{userId}/generatedImages/{imageId}": {
       "schema": "GeneratedImageRecord",

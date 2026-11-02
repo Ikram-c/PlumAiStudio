@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { COCODataset } from '../types';
 import { extractCategorySummary } from '../lib/cocoTools';
+import { generateDatasetSummaryPDF } from '../lib/pdfExport';
 import {
   BarChart3,
   Download,
@@ -9,6 +10,9 @@ import {
   ArrowUpDown,
   FileSpreadsheet,
   FileJson,
+  FileText,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
 import { DashboardResearchSection } from './DashboardResearchSection';
 
@@ -30,6 +34,8 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortField, setSortField] = useState<SortField>('count');
   const [sortAsc, setSortAsc] = useState<boolean>(false);
+  const [pdfExported, setPdfExported] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const rawSummaries = useMemo(() => extractCategorySummary(dataset), [dataset]);
   const categories = useMemo(() => ['All', ...dataset.categories.map((c) => c.name)], [dataset]);
@@ -126,6 +132,7 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setUploadError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -133,10 +140,10 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({
         if (json.images && json.annotations && json.categories) {
           onUploadDataset(json);
         } else {
-          alert('Invalid COCO JSON: expected images, annotations, and categories keys.');
+          setUploadError('Invalid COCO JSON: expected images, annotations, and categories keys.');
         }
-      } catch (err) {
-        alert('Failed to parse JSON file');
+      } catch {
+        setUploadError('Failed to parse JSON file. Please verify the file is valid JSON.');
       }
     };
     reader.readAsText(file);
@@ -168,6 +175,19 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({
     a.download = 'dataset_coco.json';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleExportPdf = () => {
+    generateDatasetSummaryPDF({
+      dataset,
+      summaries: rawSummaries,
+      selectedCategory,
+      areaBins,
+      aspectRatioBins,
+      annotationsPerImage,
+    });
+    setPdfExported(true);
+    setTimeout(() => setPdfExported(false), 3000);
   };
 
   const totalAnnotations = dataset.annotations.length;
@@ -207,14 +227,47 @@ export const COCODashboard: React.FC<COCODashboardProps> = ({
           </button>
 
           <button
+            onClick={handleExportPdf}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/90 hover:bg-emerald-600 text-white text-xs font-medium shadow-sm transition-colors cursor-pointer"
+            title="Download PDF report with dataset statistics and category distribution charts"
+          >
+            {pdfExported ? (
+              <>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>PDF Downloaded</span>
+              </>
+            ) : (
+              <>
+                <FileText className="w-3.5 h-3.5" />
+                <span>Export PDF Report</span>
+              </>
+            )}
+          </button>
+
+          <button
             onClick={exportFullCocoJson}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white text-xs font-medium shadow-sm transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white text-xs font-medium shadow-sm transition-colors cursor-pointer"
           >
             <FileJson className="w-3.5 h-3.5" />
             <span>Export COCO JSON</span>
           </button>
         </div>
       </div>
+
+      {uploadError && (
+        <div className="flex items-center justify-between gap-3 bg-rose-950/60 border border-rose-800/70 text-rose-200 px-4 py-2.5 rounded-xl text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{uploadError}</span>
+          </div>
+          <button
+            onClick={() => setUploadError(null)}
+            className="text-rose-300 hover:text-white font-medium"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from 'react';
-import { COCODataset } from '../types';
+import { COCODataset, AnnotationErrorType } from '../types';
 import {
   analyzeOverlaps,
   isSelfIntersecting,
   AnnotationBloomFilter,
+  scanDatasetErrors,
 } from '../lib/cocoTools';
 import {
   Scissors,
@@ -12,8 +13,15 @@ import {
   Download,
   Split,
   Filter,
-  PlusCircle,
   RotateCcw,
+  ShieldAlert,
+  ScanSearch,
+  Wrench,
+  Trash2,
+  AlertTriangle,
+  Layers,
+  Maximize2,
+  BoxSelect,
 } from 'lucide-react';
 
 interface COCOToolsPanelProps {
@@ -22,7 +30,73 @@ interface COCOToolsPanelProps {
 }
 
 export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdateAnnotations }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'overlap' | 'self_intersect' | 'bloom' | 'splitter'>('overlap');
+  const [activeSubTab, setActiveSubTab] = useState<
+    'scanner' | 'overlap' | 'self_intersect' | 'bloom' | 'splitter'
+  >('scanner');
+
+  // Automated Error Scanner state
+  const [crossLabelIouThreshold, setCrossLabelIouThreshold] = useState<number>(0.15);
+  const [includeContainment, setIncludeContainment] = useState<boolean>(true);
+  const [selectedErrorFilter, setSelectedErrorFilter] = useState<'all' | AnnotationErrorType>('all');
+  const [lastScanTime, setLastScanTime] = useState<string>(() =>
+    new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  );
+  const [scanPulse, setScanPulse] = useState<boolean>(false);
+
+  const auditResult = useMemo(() => {
+    return scanDatasetErrors(dataset, {
+      crossLabelIouThreshold,
+      includeContainment,
+    });
+  }, [dataset, crossLabelIouThreshold, includeContainment]);
+
+  const filteredIssues = useMemo(() => {
+    if (selectedErrorFilter === 'all') return auditResult.issues;
+    return auditResult.issues.filter((issue) => issue.type === selectedErrorFilter);
+  }, [auditResult.issues, selectedErrorFilter]);
+
+  const handleTriggerRescan = () => {
+    setScanPulse(true);
+    setLastScanTime(
+      new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    );
+    setTimeout(() => setScanPulse(false), 500);
+  };
+
+  const handleAutoRepairDataset = () => {
+    if (!onUpdateAnnotations) return;
+    onUpdateAnnotations({
+      ...dataset,
+      annotations: auditResult.repairedAnnotations,
+    });
+  };
+
+  const handleRemoveSingleAnnotation = (annotationId: number) => {
+    if (!onUpdateAnnotations) return;
+    onUpdateAnnotations({
+      ...dataset,
+      annotations: dataset.annotations.filter((a) => a.id !== annotationId),
+    });
+  };
+
+  const handleExportAuditReport = () => {
+    const report = {
+      dataset: dataset.info?.description || 'COCO Dataset',
+      scannedAt: new Date().toISOString(),
+      totalAnnotationsScanned: auditResult.totalScanned,
+      healthyCount: auditResult.healthyCount,
+      healthScorePercent: auditResult.healthScore,
+      countsByType: auditResult.countsByType,
+      issues: auditResult.issues,
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'coco_annotation_error_audit.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Overlap analysis
   const overlapAnalysis = useMemo(() => {
@@ -132,24 +206,46 @@ export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdat
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <Scissors className="w-5 h-5 text-violet-400" />
-              <h1 className="text-xl font-bold text-white tracking-tight">COCO Dataset Tools & Overlap Resolver</h1>
+              <h1 className="text-xl font-bold text-white tracking-tight">COCO Dataset Tools & QA Auditor</h1>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-violet-950 text-violet-300 border border-violet-800/60">
-                Sweep-Line Accelerated
+                Automated Validation
               </span>
             </div>
             <p className="text-sm text-slate-400 mt-1">
-              Sweep-line detection for nested bounding boxes, polygon self-intersection validation, and Bloom ID collision remapping.
+              Automated annotation error scanning, sweep-line overlap resolution, polygon self-intersection, and Bloom ID remapping.
             </p>
           </div>
 
-          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+          <div className="flex flex-wrap items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs gap-1">
+            <button
+              onClick={() => setActiveSubTab('scanner')}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
+                activeSubTab === 'scanner'
+                  ? 'bg-violet-600 text-white font-medium'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ScanSearch className="w-3.5 h-3.5" />
+              <span>Error Scanner</span>
+              {auditResult.issues.length > 0 && (
+                <span
+                  className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                    activeSubTab === 'scanner'
+                      ? 'bg-white/20 text-white'
+                      : 'bg-rose-950 text-rose-300 border border-rose-800/60'
+                  }`}
+                >
+                  {auditResult.issues.length}
+                </span>
+              )}
+            </button>
             <button
               onClick={() => setActiveSubTab('overlap')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
                 activeSubTab === 'overlap' ? 'bg-violet-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -157,7 +253,7 @@ export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdat
             </button>
             <button
               onClick={() => setActiveSubTab('self_intersect')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
                 activeSubTab === 'self_intersect' ? 'bg-violet-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -165,7 +261,7 @@ export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdat
             </button>
             <button
               onClick={() => setActiveSubTab('bloom')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
                 activeSubTab === 'bloom' ? 'bg-violet-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -173,7 +269,7 @@ export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdat
             </button>
             <button
               onClick={() => setActiveSubTab('splitter')}
-              className={`px-3 py-1.5 rounded-lg transition-colors ${
+              className={`px-3 py-1.5 rounded-lg transition-colors cursor-pointer ${
                 activeSubTab === 'splitter' ? 'bg-violet-600 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
@@ -182,6 +278,353 @@ export const COCOToolsPanel: React.FC<COCOToolsPanelProps> = ({ dataset, onUpdat
           </div>
         </div>
       </div>
+
+      {/* Subtab 0: Automated Dataset Error Scanner */}
+      {activeSubTab === 'scanner' && (
+        <div className="space-y-6">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
+              <span className="text-xs text-slate-400">Dataset Health Score</span>
+              <div className="flex items-baseline gap-2 mt-1">
+                <p
+                  className={`text-2xl font-bold ${
+                    auditResult.healthScore >= 90
+                      ? 'text-emerald-400'
+                      : auditResult.healthScore >= 70
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                >
+                  {auditResult.healthScore}%
+                </p>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {auditResult.healthyCount}/{auditResult.totalScanned} clean
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-500 font-mono mt-1 block">
+                Scanned @ {lastScanTime}
+              </span>
+            </div>
+
+            <div
+              onClick={() =>
+                setSelectedErrorFilter(
+                  selectedErrorFilter === 'missing_bbox' ? 'all' : 'missing_bbox'
+                )
+              }
+              className={`bg-slate-900 border p-4 rounded-xl cursor-pointer transition-colors ${
+                selectedErrorFilter === 'missing_bbox'
+                  ? 'border-rose-500 bg-rose-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-rose-400 font-medium">Missing / Bad BBox</span>
+                <BoxSelect className="w-3.5 h-3.5 text-rose-400" />
+              </div>
+              <p className="text-2xl font-bold text-white mt-1">
+                {auditResult.countsByType.missing_bbox}
+              </p>
+              <span className="text-[11px] text-slate-500 font-mono mt-1 block">
+                Null, NaN, or negative xy
+              </span>
+            </div>
+
+            <div
+              onClick={() =>
+                setSelectedErrorFilter(
+                  selectedErrorFilter === 'conflicting_overlap' ? 'all' : 'conflicting_overlap'
+                )
+              }
+              className={`bg-slate-900 border p-4 rounded-xl cursor-pointer transition-colors ${
+                selectedErrorFilter === 'conflicting_overlap'
+                  ? 'border-amber-500 bg-amber-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-amber-400 font-medium">Cross-Label Overlaps</span>
+                <Layers className="w-3.5 h-3.5 text-amber-400" />
+              </div>
+              <p className="text-2xl font-bold text-white mt-1">
+                {auditResult.countsByType.conflicting_overlap}
+              </p>
+              <span className="text-[11px] text-slate-500 font-mono mt-1 block">
+                Different labels overlapping
+              </span>
+            </div>
+
+            <div
+              onClick={() =>
+                setSelectedErrorFilter(selectedErrorFilter === 'zero_area' ? 'all' : 'zero_area')
+              }
+              className={`bg-slate-900 border p-4 rounded-xl cursor-pointer transition-colors ${
+                selectedErrorFilter === 'zero_area'
+                  ? 'border-orange-500 bg-orange-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-orange-400 font-medium">Zero-Area BBoxes</span>
+                <Maximize2 className="w-3.5 h-3.5 text-orange-400" />
+              </div>
+              <p className="text-2xl font-bold text-white mt-1">
+                {auditResult.countsByType.zero_area}
+              </p>
+              <span className="text-[11px] text-slate-500 font-mono mt-1 block">
+                Width/height ≤ 0 or area 0
+              </span>
+            </div>
+
+            <div
+              onClick={() =>
+                setSelectedErrorFilter(
+                  selectedErrorFilter === 'out_of_bounds' ? 'all' : 'out_of_bounds'
+                )
+              }
+              className={`bg-slate-900 border p-4 rounded-xl cursor-pointer transition-colors ${
+                selectedErrorFilter === 'out_of_bounds'
+                  ? 'border-cyan-500 bg-cyan-950/20'
+                  : 'border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-cyan-400 font-medium">Bounds / Orphans</span>
+                <AlertTriangle className="w-3.5 h-3.5 text-cyan-400" />
+              </div>
+              <p className="text-2xl font-bold text-white mt-1">
+                {auditResult.countsByType.out_of_bounds +
+                  auditResult.countsByType.orphan_reference}
+              </p>
+              <span className="text-[11px] text-slate-500 font-mono mt-1 block">
+                Exceeds image W×H
+              </span>
+            </div>
+          </div>
+
+          {/* Scanner Configuration & Remediation Toolbar */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-5">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="flex flex-wrap items-center gap-6">
+                <div>
+                  <label className="text-xs font-medium text-slate-300 block mb-1">
+                    Cross-Label Overlap IoU Threshold:{' '}
+                    <span className="font-mono text-violet-400">
+                      {(crossLabelIouThreshold * 100).toFixed(0)}%
+                    </span>
+                  </label>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.80"
+                    step="0.05"
+                    value={crossLabelIouThreshold}
+                    onChange={(e) => setCrossLabelIouThreshold(Number(e.target.value))}
+                    className="w-48 accent-violet-500 cursor-pointer"
+                  />
+                </div>
+
+                <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeContainment}
+                    onChange={(e) => setIncludeContainment(e.target.checked)}
+                    className="rounded border-slate-700 bg-slate-950 text-violet-600 focus:ring-0 cursor-pointer"
+                  />
+                  <span>Flag Cross-Class Enclosed / Nested Boxes (≥75% containment)</span>
+                </label>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleTriggerRescan}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-all cursor-pointer ${
+                    scanPulse ? 'ring-2 ring-violet-500' : ''
+                  }`}
+                >
+                  <ScanSearch className="w-3.5 h-3.5 text-violet-400" />
+                  <span>Re-Run Scan</span>
+                </button>
+
+                {auditResult.issues.length > 0 && onUpdateAnnotations && (
+                  <button
+                    onClick={handleAutoRepairDataset}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium shadow-sm transition-colors cursor-pointer"
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>Auto-Repair & Prune Degenerate</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={handleExportAuditReport}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white text-xs font-medium shadow-sm transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export Audit JSON</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Tabs */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {(
+                  [
+                    { id: 'all', label: `All Findings (${auditResult.issues.length})` },
+                    {
+                      id: 'missing_bbox',
+                      label: `Missing / Malformed BBox (${auditResult.countsByType.missing_bbox})`,
+                    },
+                    {
+                      id: 'conflicting_overlap',
+                      label: `Cross-Label Overlaps (${auditResult.countsByType.conflicting_overlap})`,
+                    },
+                    {
+                      id: 'zero_area',
+                      label: `Zero-Area (${auditResult.countsByType.zero_area})`,
+                    },
+                    {
+                      id: 'out_of_bounds',
+                      label: `Out-of-Bounds (${auditResult.countsByType.out_of_bounds})`,
+                    },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setSelectedErrorFilter(tab.id)}
+                    className={`px-2.5 py-1 rounded-lg border transition-colors cursor-pointer ${
+                      selectedErrorFilter === tab.id
+                        ? 'bg-violet-600/20 border-violet-500 text-violet-200 font-medium'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <span className="text-xs font-mono text-slate-500">
+                Showing {filteredIssues.length} of {auditResult.issues.length} detected issues
+              </span>
+            </div>
+
+            {/* Issues List */}
+            {filteredIssues.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 bg-slate-950 rounded-xl border border-slate-800">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+                <p className="text-sm font-medium text-white">
+                  No Annotation Errors Found in Current Filter
+                </p>
+                <p className="text-xs mt-1">
+                  All checked annotations have valid bounding box coordinates, positive areas, and clean class boundaries.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredIssues.map((issue) => {
+                  const badgeStyle =
+                    issue.type === 'missing_bbox'
+                      ? 'bg-rose-950 text-rose-300 border-rose-800/70'
+                      : issue.type === 'zero_area'
+                      ? 'bg-orange-950 text-orange-300 border-orange-800/70'
+                      : issue.type === 'conflicting_overlap'
+                      ? 'bg-amber-950 text-amber-300 border-amber-800/70'
+                      : 'bg-cyan-950 text-cyan-300 border-cyan-800/70';
+
+                  const typeLabel =
+                    issue.type === 'missing_bbox'
+                      ? 'MISSING / MALFORMED BBOX'
+                      : issue.type === 'zero_area'
+                      ? 'ZERO-AREA ANNOTATION'
+                      : issue.type === 'conflicting_overlap'
+                      ? 'OVERLAPPING DIFFERENT LABELS'
+                      : issue.type === 'out_of_bounds'
+                      ? 'OUT OF BOUNDS'
+                      : 'ORPHAN REFERENCE';
+
+                  return (
+                    <div
+                      key={issue.id}
+                      className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-700 transition-colors"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${badgeStyle}`}
+                          >
+                            {typeLabel}
+                          </span>
+                          <span className="text-xs font-mono text-slate-300 font-semibold">
+                            Annotation #{issue.annotationId}
+                            {issue.secondaryAnnotationId
+                              ? ` ↔ #${issue.secondaryAnnotationId}`
+                              : ''}
+                          </span>
+                          <span className="text-xs text-slate-500">•</span>
+                          <span className="text-xs text-violet-300 font-medium">
+                            {issue.categoryName}
+                            {issue.secondaryCategoryName
+                              ? ` vs. ${issue.secondaryCategoryName}`
+                              : ''}
+                          </span>
+                          <span className="text-xs text-slate-500">•</span>
+                          <span className="text-xs font-mono text-slate-400">
+                            Image #{issue.imageId} ({issue.imageFileName || 'frame'})
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-200">{issue.message}</p>
+
+                        <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-400 font-mono">
+                          {issue.bbox && (
+                            <span>
+                              BBox: [{issue.bbox.map((n) => Math.round(n)).join(', ')}]
+                            </span>
+                          )}
+                          {issue.iou !== undefined && (
+                            <span className="text-amber-300">
+                              IoU: {(issue.iou * 100).toFixed(1)}%
+                            </span>
+                          )}
+                          {issue.containment !== undefined && (
+                            <span className="text-amber-300">
+                              Containment: {(issue.containment * 100).toFixed(0)}%
+                            </span>
+                          )}
+                          <span className="text-emerald-400/90 font-sans">
+                            Fix: {issue.suggestedFix}
+                          </span>
+                        </div>
+                      </div>
+
+                      {onUpdateAnnotations && (
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() =>
+                              handleRemoveSingleAnnotation(
+                                issue.secondaryAnnotationId ?? issue.annotationId
+                              )
+                            }
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/80 text-rose-200 border border-rose-800/60 text-xs font-medium transition-colors cursor-pointer"
+                            title="Remove offending annotation from dataset"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>
+                              Drop #{issue.secondaryAnnotationId ?? issue.annotationId}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Subtab 1: Overlap & Nesting Detection */}
       {activeSubTab === 'overlap' && (

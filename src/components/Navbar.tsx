@@ -10,6 +10,7 @@ import {
   Layers,
   Wand2,
   BookOpen,
+  Keyboard,
 } from 'lucide-react';
 import { AuthBar } from './AuthBar';
 
@@ -30,6 +31,7 @@ interface NavbarProps {
   setActiveTab: (tab: TabId) => void;
   datasetName: string;
   onSelectDatasetPreset: (preset: 'marine' | 'drone') => void;
+  onOpenShortcuts?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -37,22 +39,29 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   datasetName,
   onSelectDatasetPreset,
+  onOpenShortcuts,
 }) => {
-  const navItems: { id: TabId; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'dashboard', label: 'COCO Stats', icon: <BarChart3 className="w-4 h-4" /> },
-    { id: 'research', label: 'Research & News', icon: <BookOpen className="w-4 h-4" />, badge: 'Google Search' },
-    { id: 'ai-studio', label: 'AI Image Studio', icon: <Wand2 className="w-4 h-4" /> },
-    { id: 'heatmap', label: 'BBox Heatmap', icon: <Flame className="w-4 h-4" /> },
-    { id: 'geometry', label: 'GJK 2D Geometry', icon: <Shapes className="w-4 h-4" /> },
-    { id: 'coco-tools', label: 'Overlap & Slicing', icon: <Scissors className="w-4 h-4" /> },
-    { id: 'quality', label: 'Image Quality', icon: <Sparkles className="w-4 h-4" /> },
-    { id: 'ca-correction', label: 'CA Correction', icon: <SlidersHorizontal className="w-4 h-4" /> },
-    { id: 'optimizer', label: 'Detection Optimizer', icon: <Layers className="w-4 h-4" /> },
-    { id: 'video-zarr', label: 'Video to Zarr', icon: <Video className="w-4 h-4" /> },
+  const navItems: {
+    id: TabId;
+    label: string;
+    icon: React.ReactNode;
+    shortcutKey: string;
+    badge?: string;
+  }[] = [
+    { id: 'dashboard', label: 'COCO Stats', icon: <BarChart3 className="w-4 h-4" />, shortcutKey: '1' },
+    { id: 'research', label: 'Research & News', icon: <BookOpen className="w-4 h-4" />, shortcutKey: '2', badge: 'Search' },
+    { id: 'ai-studio', label: 'AI Image Studio', icon: <Wand2 className="w-4 h-4" />, shortcutKey: '3' },
+    { id: 'heatmap', label: 'BBox Heatmap', icon: <Flame className="w-4 h-4" />, shortcutKey: '4' },
+    { id: 'geometry', label: 'GJK 2D Geometry', icon: <Shapes className="w-4 h-4" />, shortcutKey: '5' },
+    { id: 'coco-tools', label: 'Overlap & Slicing', icon: <Scissors className="w-4 h-4" />, shortcutKey: '6' },
+    { id: 'quality', label: 'Image Quality', icon: <Sparkles className="w-4 h-4" />, shortcutKey: '7' },
+    { id: 'ca-correction', label: 'CA Correction', icon: <SlidersHorizontal className="w-4 h-4" />, shortcutKey: '8' },
+    { id: 'optimizer', label: 'Detection Optimizer', icon: <Layers className="w-4 h-4" />, shortcutKey: '9' },
+    { id: 'video-zarr', label: 'Video to Zarr', icon: <Video className="w-4 h-4" />, shortcutKey: '0' },
   ];
 
   return (
-    <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-50">
+    <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur-md sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo & Brand */}
@@ -73,8 +82,8 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Dataset Switcher, Presets & Auth */}
-          <div className="flex items-center gap-3">
+          {/* Dataset Switcher, Presets, Shortcuts & Auth */}
+          <div className="flex items-center gap-2.5">
             <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950/70 border border-slate-800 text-xs text-slate-300">
               <span className="text-slate-500">Active:</span>
               <span className="font-medium text-violet-300 truncate max-w-[140px]">{datasetName}</span>
@@ -84,18 +93,34 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 onClick={() => onSelectDatasetPreset('marine')}
                 className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors cursor-pointer"
-                title="Underwater Benthic Coral Reef Dataset"
+                title="Underwater Benthic Coral Reef Dataset (Ctrl+Shift+M)"
               >
                 Marine
               </button>
               <button
                 onClick={() => onSelectDatasetPreset('drone')}
                 className="px-2.5 py-1 rounded-md text-slate-300 hover:text-white hover:bg-slate-700/70 transition-colors cursor-pointer"
-                title="Offshore Drone Inspection Dataset"
+                title="Offshore Drone Inspection Dataset (Ctrl+Shift+D)"
               >
                 Drone
               </button>
             </div>
+
+            {/* Keyboard Shortcuts Button */}
+            {onOpenShortcuts && (
+              <button
+                type="button"
+                onClick={onOpenShortcuts}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 hover:border-violet-500/40 text-xs text-slate-300 hover:text-white transition-colors cursor-pointer"
+                title="Open Keyboard Shortcut Manager (Ctrl+K or ?)"
+              >
+                <Keyboard className="w-3.5 h-3.5 text-violet-400" />
+                <span className="hidden md:inline">Shortcuts</span>
+                <kbd className="px-1.5 py-0.2 rounded bg-slate-900 border border-slate-700 text-[10px] font-mono text-slate-400">
+                  Ctrl+K
+                </kbd>
+              </button>
+            )}
 
             {/* Firebase Auth Google Sign-In Bar */}
             <AuthBar />
@@ -110,7 +135,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer ${
+                title={`${item.label} (Ctrl+${item.shortcutKey} or Alt+${item.shortcutKey})`}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all duration-150 cursor-pointer ${
                   isActive
                     ? 'bg-violet-600 text-white shadow-sm shadow-violet-500/25'
                     : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
@@ -119,10 +145,25 @@ export const Navbar: React.FC<NavbarProps> = ({
                 {item.icon}
                 <span>{item.label}</span>
                 {item.badge && (
-                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-indigo-400/20 text-indigo-200 border border-indigo-400/30">
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[9px] font-mono border ${
+                      isActive
+                        ? 'bg-white/15 text-white border-white/25'
+                        : 'bg-indigo-400/15 text-indigo-300 border-indigo-400/25'
+                    }`}
+                  >
                     {item.badge}
                   </span>
                 )}
+                <kbd
+                  className={`hidden xl:inline-block px-1 py-0.2 rounded text-[9px] font-mono border ${
+                    isActive
+                      ? 'bg-violet-700/80 text-violet-100 border-violet-400/40'
+                      : 'bg-slate-950/60 text-slate-500 border-slate-800'
+                  }`}
+                >
+                  ^{item.shortcutKey}
+                </kbd>
               </button>
             );
           })}

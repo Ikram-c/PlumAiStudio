@@ -69,3 +69,6 @@ export async function testConnection(): Promise<boolean> {
     return true;
   }
 }
+
+testConnection();
+

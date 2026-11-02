@@ -48,7 +48,7 @@ export const DashboardResearchSection: React.FC<DashboardResearchSectionProps> =
   const [loading, setLoading] = useState<boolean>(false);
   const [result, setResult] = useState<ResearchSearchResult | null>(null);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
-  const [isExpanded, setIsExpanded] = useState<boolean>(true);
+  const [authWarning, setAuthWarning] = useState<string | null>(null);
 
   const fetchResearch = async (searchQuery: string) => {
     setLoading(true);
@@ -87,7 +87,8 @@ export const DashboardResearchSection: React.FC<DashboardResearchSectionProps> =
   const handleSaveToFirestore = async () => {
     const user = auth.currentUser;
     if (!user) {
-      alert('Please sign in with Google to save research digests to Cloud Firestore.');
+      setAuthWarning('Sign in with Google above to bookmark digests to Cloud Firestore.');
+      setTimeout(() => setAuthWarning(null), 4000);
       return;
     }
     if (!result) return;
@@ -101,7 +102,6 @@ export const DashboardResearchSection: React.FC<DashboardResearchSectionProps> =
         type: 'research',
         title: `CV Research: ${result.query.slice(0, 60)}`,
         summary: result.summary.slice(0, 800),
-        sources: result.sources.slice(0, 5),
         createdAt: new Date().toISOString(),
       });
       setSavedSuccess(true);
@@ -188,6 +188,12 @@ export const DashboardResearchSection: React.FC<DashboardResearchSectionProps> =
           )}
         </div>
       </div>
+
+      {authWarning && (
+        <div className="px-3.5 py-2 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-200 text-xs flex items-center justify-between">
+          <span>{authWarning}</span>
+        </div>
+      )}
 
       {/* Search Input Bar */}
       <form onSubmit={handleSearchSubmit} className="flex gap-2">

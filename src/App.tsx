@@ -10,6 +10,7 @@ import { DetectionOptimizer } from './components/DetectionOptimizer';
 import { VideoZarrConfigurator } from './components/VideoZarrConfigurator';
 import { AIImageStudio } from './components/AIImageStudio';
 import { ResearchHub } from './components/ResearchHub';
+import { ShortcutManager } from './components/ShortcutManager';
 import { createMarineSurveyDataset, createDroneSurveyDataset } from './lib/cocoTools';
 import { COCODataset } from './types';
 
@@ -17,6 +18,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [datasetPreset, setDatasetPreset] = useState<'marine' | 'drone' | 'custom'>('marine');
   const [dataset, setDataset] = useState<COCODataset>(() => createMarineSurveyDataset());
+  const [isShortcutModalOpen, setIsShortcutModalOpen] = useState<boolean>(false);
 
   const handleSelectDatasetPreset = (preset: 'marine' | 'drone') => {
     setDatasetPreset(preset);
@@ -47,6 +49,16 @@ export const App: React.FC = () => {
         setActiveTab={setActiveTab}
         datasetName={datasetDisplayName}
         onSelectDatasetPreset={handleSelectDatasetPreset}
+        onOpenShortcuts={() => setIsShortcutModalOpen(true)}
+      />
+
+      {/* Global Keyboard Shortcut Manager & Quick Jump Palette */}
+      <ShortcutManager
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onSelectDatasetPreset={handleSelectDatasetPreset}
+        isOpen={isShortcutModalOpen}
+        setIsOpen={setIsShortcutModalOpen}
       />
 
       {/* Main Tab Content */}
@@ -90,6 +102,14 @@ export const App: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-4 font-mono text-[11px]">
+            <button
+              type="button"
+              onClick={() => setIsShortcutModalOpen(true)}
+              className="text-slate-400 hover:text-violet-300 transition-colors cursor-pointer"
+            >
+              Shortcuts: Ctrl+1..0 / Ctrl+K
+            </button>
+            <span>•</span>
             <span className="text-slate-400">Firebase Auth & Firestore Connected</span>
             <span>•</span>
             <span className="text-emerald-400">Full-Stack Express + Vite</span>

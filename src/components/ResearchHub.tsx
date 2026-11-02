@@ -40,6 +40,7 @@ export const ResearchHub: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(false);
   const [result, setResult] = useState<ResearchSearchResult | null>(null);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+  const [authWarning, setAuthWarning] = useState<string | null>(null);
 
   const fetchResearch = async (searchQuery: string) => {
     setLoading(true);
@@ -78,7 +79,8 @@ export const ResearchHub: React.FC = () => {
   const handleSaveToFirestore = async () => {
     const user = auth.currentUser;
     if (!user) {
-      alert('Please sign in with Google to save research digests to Cloud Firestore.');
+      setAuthWarning('Sign in with Google above to bookmark digests to Cloud Firestore.');
+      setTimeout(() => setAuthWarning(null), 4000);
       return;
     }
     if (!result) return;
@@ -89,7 +91,7 @@ export const ResearchHub: React.FC = () => {
       await setDoc(docRef, {
         id: recordId,
         userId: user.uid,
-        type: 'frequency', // or research
+        type: 'research',
         title: `Research: ${result.query.slice(0, 50)}`,
         summary: result.summary.slice(0, 500),
         createdAt: new Date().toISOString(),
@@ -149,6 +151,12 @@ export const ResearchHub: React.FC = () => {
             </div>
           )}
         </div>
+
+        {authWarning && (
+          <div className="mt-3 px-3.5 py-2 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-200 text-xs">
+            {authWarning}
+          </div>
+        )}
 
         {/* Search Bar & Query Chips */}
         <div className="mt-4 pt-4 border-t border-slate-800/80 space-y-3">

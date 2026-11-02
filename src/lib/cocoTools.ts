@@ -1,4 +1,11 @@
-import { COCODataset, COCOAnnotation, OverlapResult, CategorySummary } from '../types';
+import {
+  COCODataset,
+  COCOAnnotation,
+  OverlapResult,
+  CategorySummary,
+  AnnotationErrorIssue,
+  DatasetAuditResult,
+} from '../types';
 
 /**
  * 2D Segment intersection helper for sweep-line self-intersection testing.
@@ -291,6 +298,301 @@ export function extractCategorySummary(dataset: COCODataset): CategorySummary[] 
 }
 
 /**
+ * Automated Dataset Error Scanner for COCO annotations.
+ * Scans for:
+ * 1. Missing or malformed bounding boxes (null/undefined, wrong tuple length, NaN, negative origin)
+ * 2. Zero-area or degenerate bounding boxes (width <= 0, height <= 0, or area <= 0)
+ * 3. Overlapping boxes with different category labels on the same image (cross-class IoU or containment)
+ * 4. Out-of-bounds bounding boxes exceeding parent image dimensions
+ * 5. Orphaned image_id or category_id references
+ */
+export function scanDatasetErrors(
+  dataset: COCODataset,
+  options: {
+    crossLabelIouThreshold?: number;
+    includeContainment?: boolean;
+  } = {}
+): DatasetAuditResult {
+  const iouThreshold = options.crossLabelIouThreshold ?? 0.15;
+  const includeContainment = options.includeContainment ?? true;
+
+  const imageMap = new Map<number, { width: number; height: number; file_name: string }>();
+  dataset.images.forEach((img) => {
+    imageMap.set(img.id, { width: img.width, height: img.height, file_name: img.file_name });
+  });
+
+  const categoryMap = new Map<number, string>();
+  dataset.categories.forEach((cat) => {
+    categoryMap.set(cat.id, cat.name);
+  });
+
+  const issues: AnnotationErrorIssue[] = [];
+  const flaggedAnnotationIds = new Set<number>();
+  const unrecoverableIds = new Set<number>();
+
+  const countsByType = {
+    missing_bbox: 0,
+    zero_area: 0,
+    conflicting_overlap: 0,
+    out_of_bounds: 0,
+    orphan_reference: 0,
+  };
+
+  // Pass 1: Per-annotation structural & geometric validation
+  dataset.annotations.forEach((ann) => {
+    const catName =
+      ann.category_name || categoryMap.get(ann.category_id) || `Class #${ann.category_id}`;
+    const imgInfo = imageMap.get(ann.image_id);
+
+    // Check orphan image or category reference
+    if (!imgInfo || !categoryMap.has(ann.category_id)) {
+      countsByType.orphan_reference++;
+      flaggedAnnotationIds.add(ann.id);
+      unrecoverableIds.add(ann.id);
+      issues.push({
+        id: `err-orphan-${ann.id}`,
+        annotationId: ann.id,
+        imageId: ann.image_id,
+        imageFileName: imgInfo?.file_name || `Missing Image #${ann.image_id}`,
+        type: 'orphan_reference',
+        severity: 'critical',
+        categoryName: catName,
+        bbox: ann.bbox,
+        area: ann.area,
+        message: !imgInfo
+          ? `Annotation #${ann.id} references non-existent image_id ${ann.image_id}.`
+          : `Annotation #${ann.id} references unregistered category_id ${ann.category_id}.`,
+        suggestedFix: 'Remove orphaned annotation or register missing parent metadata.',
+      });
+    }
+
+    // 1. Check Missing or Malformed Bounding Box
+    const hasValidArray =
+      Array.isArray(ann.bbox) &&
+      ann.bbox.length === 4 &&
+      ann.bbox.every((v) => typeof v === 'number' && Number.isFinite(v));
+
+    if (!hasValidArray) {
+      countsByType.missing_bbox++;
+      flaggedAnnotationIds.add(ann.id);
+      unrecoverableIds.add(ann.id);
+      issues.push({
+        id: `err-missing-bbox-${ann.id}`,
+        annotationId: ann.id,
+        imageId: ann.image_id,
+        imageFileName: imgInfo?.file_name,
+        type: 'missing_bbox',
+        severity: 'critical',
+        categoryName: catName,
+        bbox: Array.isArray(ann.bbox) ? ann.bbox : [],
+        area: ann.area,
+        message: `Annotation #${ann.id} has a missing or malformed bbox tuple (${JSON.stringify(ann.bbox)}).`,
+        suggestedFix: 'Prune annotation with missing bounding box coordinates.',
+      });
+      return;
+    }
+
+    const [x, y, w, h] = ann.bbox;
+
+    // Check negative origin coordinates (malformed bbox placement)
+    if (x < 0 || y < 0) {
+      countsByType.missing_bbox++;
+      flaggedAnnotationIds.add(ann.id);
+      issues.push({
+        id: `err-neg-bbox-${ann.id}`,
+        annotationId: ann.id,
+        imageId: ann.image_id,
+        imageFileName: imgInfo?.file_name,
+        type: 'missing_bbox',
+        severity: 'critical',
+        categoryName: catName,
+        bbox: ann.bbox,
+        area: ann.area,
+        message: `Malformed negative bounding box origin [${x}, ${y}, ${w}, ${h}] on Annotation #${ann.id}.`,
+        suggestedFix: 'Clamp negative (x, y) origin to [0, 0] and adjust width/height.',
+      });
+    }
+
+    // 2. Check Zero-Area or Degenerate Dimensions
+    const computedArea = w * h;
+    if (w <= 0 || h <= 0 || computedArea <= 0 || (ann.area !== undefined && ann.area <= 0)) {
+      countsByType.zero_area++;
+      flaggedAnnotationIds.add(ann.id);
+      if (w <= 0 || h <= 0) {
+        unrecoverableIds.add(ann.id);
+      }
+      issues.push({
+        id: `err-zero-area-${ann.id}`,
+        annotationId: ann.id,
+        imageId: ann.image_id,
+        imageFileName: imgInfo?.file_name,
+        type: 'zero_area',
+        severity: 'critical',
+        categoryName: catName,
+        bbox: ann.bbox,
+        area: ann.area ?? computedArea,
+        message:
+          w <= 0 || h <= 0
+            ? `Zero/degenerate bounding box dimensions (${w}×${h} px) on Annotation #${ann.id}.`
+            : `Zero declared area (${ann.area} px²) despite ${w}×${h} px bounding box on Annotation #${ann.id}.`,
+        suggestedFix:
+          w <= 0 || h <= 0
+            ? 'Prune degenerate zero-dimension bounding box.'
+            : `Recompute area from bbox dimensions (${Math.round(computedArea)} px²).`,
+      });
+    }
+
+    // 4. Check Out-of-Bounds relative to parent image dimensions
+    if (imgInfo && w > 0 && h > 0) {
+      if (x + w > imgInfo.width || y + h > imgInfo.height) {
+        countsByType.out_of_bounds++;
+        flaggedAnnotationIds.add(ann.id);
+        issues.push({
+          id: `err-oob-${ann.id}`,
+          annotationId: ann.id,
+          imageId: ann.image_id,
+          imageFileName: imgInfo.file_name,
+          type: 'out_of_bounds',
+          severity: 'warning',
+          categoryName: catName,
+          bbox: ann.bbox,
+          area: ann.area,
+          message: `BBox [${x}, ${y}, ${w}, ${h}] extends to (${x + w}, ${y + h}), exceeding image bounds (${imgInfo.width}×${imgInfo.height}).`,
+          suggestedFix: `Clip bounding box to image boundary [${Math.max(0, x)}, ${Math.max(0, y)}, ${Math.min(w, imgInfo.width - Math.max(0, x))}, ${Math.min(h, imgInfo.height - Math.max(0, y))}].`,
+        });
+      }
+    }
+  });
+
+  // Pass 2: Pairwise spatial check per image for Overlapping Boxes with Different Labels
+  const annsByImage = new Map<number, COCOAnnotation[]>();
+  dataset.annotations.forEach((ann) => {
+    if (
+      Array.isArray(ann.bbox) &&
+      ann.bbox.length === 4 &&
+      ann.bbox[2] > 0 &&
+      ann.bbox[3] > 0
+    ) {
+      if (!annsByImage.has(ann.image_id)) {
+        annsByImage.set(ann.image_id, []);
+      }
+      annsByImage.get(ann.image_id)!.push(ann);
+    }
+  });
+
+  annsByImage.forEach((anns, imageId) => {
+    const imgInfo = imageMap.get(imageId);
+    for (let i = 0; i < anns.length; i++) {
+      const a = anns[i];
+      const [ax, ay, aw, ah] = a.bbox;
+      const areaA = aw * ah;
+
+      for (let j = i + 1; j < anns.length; j++) {
+        const b = anns[j];
+        // Only check pairs with DIFFERENT category labels
+        if (a.category_id === b.category_id) continue;
+
+        const [bx, by, bw, bh] = b.bbox;
+        const areaB = bw * bh;
+
+        const interX = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
+        const interY = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
+        const interArea = interX * interY;
+
+        if (interArea <= 0) continue;
+
+        const unionArea = areaA + areaB - interArea;
+        const iou = unionArea > 0 ? interArea / unionArea : 0;
+        const containment = interArea / Math.min(areaA, areaB);
+
+        const isConflict =
+          iou >= iouThreshold || (includeContainment && containment >= 0.75);
+
+        if (isConflict) {
+          countsByType.conflicting_overlap++;
+          flaggedAnnotationIds.add(a.id);
+          flaggedAnnotationIds.add(b.id);
+
+          const catA = a.category_name || categoryMap.get(a.category_id) || `Class #${a.category_id}`;
+          const catB = b.category_name || categoryMap.get(b.category_id) || `Class #${b.category_id}`;
+
+          issues.push({
+            id: `err-conflict-${a.id}-${b.id}`,
+            annotationId: a.id,
+            secondaryAnnotationId: b.id,
+            imageId,
+            imageFileName: imgInfo?.file_name,
+            type: 'conflicting_overlap',
+            severity: iou >= 0.5 ? 'critical' : 'warning',
+            categoryName: catA,
+            secondaryCategoryName: catB,
+            iou: Number(iou.toFixed(3)),
+            containment: Number(containment.toFixed(3)),
+            bbox: a.bbox,
+            area: Math.round(interArea),
+            message:
+              iou >= iouThreshold
+                ? `Cross-label overlap between #${a.id} (${catA}) and #${b.id} (${catB}) with IoU ${(iou * 100).toFixed(1)}% (Containment ${(containment * 100).toFixed(0)}%).`
+                : `Cross-label containment: #${areaA < areaB ? a.id : b.id} (${areaA < areaB ? catA : catB}) is ${(containment * 100).toFixed(0)}% enclosed inside #${areaA < areaB ? b.id : a.id} (${areaA < areaB ? catB : catA}).`,
+            suggestedFix:
+              iou >= 0.5
+                ? `Resolve duplicate multi-label assignment on the same object; keep primary class.`
+                : `Verify whether foreground instance is occluded/nested or mislabeled.`,
+          });
+        }
+      }
+    }
+  });
+
+  const totalScanned = dataset.annotations.length;
+  const healthyCount = Math.max(0, totalScanned - flaggedAnnotationIds.size);
+  const healthScore =
+    totalScanned > 0 ? Math.round((healthyCount / totalScanned) * 100) : 100;
+
+  // Build cleanAnnotations (removes all unrecoverable + critical conflicting secondaries)
+  const cleanAnnotations = dataset.annotations.filter(
+    (ann) => !flaggedAnnotationIds.has(ann.id)
+  );
+
+  // Build repairedAnnotations (prunes unrecoverable, clamps negative/OOB coords, fixes zero area if w*h > 0)
+  const repairedAnnotations: COCOAnnotation[] = [];
+  dataset.annotations.forEach((ann) => {
+    if (unrecoverableIds.has(ann.id)) return;
+    const imgInfo = imageMap.get(ann.image_id);
+    let [x, y, w, h] = ann.bbox;
+    if (x < 0) {
+      w = Math.max(1, w + x);
+      x = 0;
+    }
+    if (y < 0) {
+      h = Math.max(1, h + y);
+      y = 0;
+    }
+    if (imgInfo) {
+      if (x + w > imgInfo.width) w = Math.max(1, imgInfo.width - x);
+      if (y + h > imgInfo.height) h = Math.max(1, imgInfo.height - y);
+    }
+    if (w <= 0 || h <= 0) return;
+
+    repairedAnnotations.push({
+      ...ann,
+      bbox: [x, y, w, h],
+      area: ann.area && ann.area > 0 ? ann.area : Math.round(w * h),
+    });
+  });
+
+  return {
+    totalScanned,
+    healthyCount,
+    healthScore,
+    issues,
+    countsByType,
+    cleanAnnotations,
+    repairedAnnotations,
+  };
+}
+
+/**
  * High-fidelity Marine Science Survey sample dataset built to mimic Plum Image Tools test cases.
  */
 export function createMarineSurveyDataset(): COCODataset {
@@ -323,6 +625,7 @@ export function createMarineSurveyDataset(): COCODataset {
     { id: 7, image_id: 102, category_id: 3, category_name: "Reef Fish", bbox: [360, 340, 190, 115], area: 21850 }, // Overlaps Fish (6)
     { id: 8, image_id: 102, category_id: 5, category_name: "Crustacean", bbox: [1150, 680, 120, 90], area: 10800 },
     { id: 9, image_id: 102, category_id: 1, category_name: "Benthic Coral", bbox: [900, 510, 620, 440], area: 272800 },
+    { id: 24, image_id: 102, category_id: 5, category_name: "Crustacean", bbox: [305, 315, 175, 105], area: 18375 }, // High-IoU conflicting label overlap with Reef Fish (#6)
     
     // 4K Quadrat
     { id: 10, image_id: 103, category_id: 1, category_name: "Benthic Coral", bbox: [500, 400, 960, 720], area: 691200 },
@@ -337,12 +640,14 @@ export function createMarineSurveyDataset(): COCODataset {
     { id: 17, image_id: 104, category_id: 3, category_name: "Reef Fish", bbox: [780, 190, 140, 75], area: 10500 },
     { id: 18, image_id: 104, category_id: 2, category_name: "Sea Urchin", bbox: [920, 810, 95, 90], area: 8550 },
     { id: 19, image_id: 104, category_id: 1, category_name: "Benthic Coral", bbox: [300, 600, 520, 380], area: 197600 },
+    { id: 25, image_id: 104, category_id: 2, category_name: "Sea Urchin", bbox: [540, 410, 0, 0], area: 0 }, // Zero-area degenerate annotation
     
     // Dropcam 09
     { id: 20, image_id: 105, category_id: 4, category_name: "Giant Kelp", bbox: [400, 100, 320, 1200], area: 384000 },
     { id: 21, image_id: 105, category_id: 1, category_name: "Benthic Coral", bbox: [1200, 300, 680, 540], area: 367200 },
     { id: 22, image_id: 105, category_id: 5, category_name: "Crustacean", bbox: [1420, 480, 130, 110], area: 14300 }, // Nested inside Coral (21)
     { id: 23, image_id: 105, category_id: 2, category_name: "Sea Urchin", bbox: [850, 920, 110, 105], area: 11550 },
+    { id: 26, image_id: 105, category_id: 3, category_name: "Reef Fish", bbox: [-18, 260, 140, 85], area: 11900 }, // Malformed negative origin bbox
   ];
 
   return {
@@ -383,6 +688,8 @@ export function createDroneSurveyDataset(): COCODataset {
     { id: 5, image_id: 202, category_id: 2, category_name: "Service Vessel", bbox: [1400, 900, 320, 140], area: 44800 },
     { id: 6, image_id: 202, category_id: 4, category_name: "Marine Wildlife", bbox: [1800, 1200, 110, 60], area: 6600 },
     { id: 7, image_id: 202, category_id: 4, category_name: "Marine Wildlife", bbox: [1840, 1210, 95, 55], area: 5225 }, // Overlapping wildlife
+    { id: 8, image_id: 202, category_id: 3, category_name: "Buoy Marker", bbox: [1805, 1202, 105, 58], area: 6090 }, // Conflicting label overlap with Marine Wildlife (#6)
+    { id: 9, image_id: 201, category_id: 4, category_name: "Marine Wildlife", bbox: [1220, 880, 0, 0], area: 0 }, // Zero-area annotation
   ];
 
   return {
